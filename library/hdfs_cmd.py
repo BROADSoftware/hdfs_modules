@@ -33,7 +33,7 @@ import os
 
 DOCUMENTATION = '''
 ---
-module: command
+module: hdfs_cmd
 short_description: Executes a command on a remote node
 description:
      - THIS IS A MODIFIED VERSION OF THE M(command) MODULE which lookup C(creates) and C(removes) files in HDFS instead of local file.
@@ -109,6 +109,8 @@ author:
     - Ansible Core Team
     - Michael DeHaan
     - Serge ALEXANDRE
+    
+    
 '''
 
 EXAMPLES = '''

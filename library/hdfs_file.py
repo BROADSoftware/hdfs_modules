@@ -117,11 +117,13 @@ options:
     default: "user.name=hdfs"
 author: 
     - Serge ALEXANDRE
+    
+    
 '''
 
 EXAMPLES = '''
 
-# Create a directory if it doesn't exist. 
+# Create a directory if it does not exist. 
 # If already existing, adjust owner, group and mode if different.
 - hdfs_file: hdfs_path=/user/joe/some_directory owner=joe group=users mode=0755 state=directory
 
@@ -137,7 +139,7 @@ EXAMPLES = '''
     hdfs_path: /usr/joe/some_file
     mode: 0600
 
-# Ensure the directory exists. If yes, don't touch it. If no, create it with provided default_xxxx valules.
+# Ensure the directory exists. If yes, do not touch it. If no, create it with provided default_xxxx values.
 - hdfs_file: hdfs_path=/user/joe/may_exist_directory default_owner=joe default_group=users default_mode=0755 state=directory
 
 

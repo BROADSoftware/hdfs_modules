@@ -72,6 +72,8 @@ options:
     default: "user.name=hdfs"
 author: 
     - Serge ALEXANDRE
+    
+    
 '''
 
 EXAMPLES = '''
