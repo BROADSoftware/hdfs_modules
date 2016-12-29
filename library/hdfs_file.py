@@ -177,13 +177,6 @@ class WebHDFS:
         except Exception as e:
             return (False, "{0}  =>  Response code: {1}".format(url, e.strerror))
         
-    class FileStatus:
-        owner = None
-        group  = None
-        type = None
-        permission = None
-        def __str__(self):
-            return "FileStatus => owner: '{0}', group: '{1}',  type:'{2}', permission:'{3}'".format(self.owner, self.group, self.type, self.permission)
 
     def getFileStatus(self, path):
         url = "http://{0}/webhdfs/v1{1}?{2}op=GETFILESTATUS".format(self.endpoint, path, self.auth)
@@ -192,12 +185,7 @@ class WebHDFS:
         if resp.status == 200:
             #print content
             result = json.loads(content)
-            fileStatus = WebHDFS.FileStatus()
-            fileStatus.owner = result['FileStatus']['owner']
-            fileStatus.group = result['FileStatus']['group']
-            fileStatus.permission = result['FileStatus']['permission']
-            fileStatus.type = result['FileStatus']['type']
-            return fileStatus
+            return result['FileStatus']
         elif resp.status == 404:
             return None
         else:
@@ -256,15 +244,15 @@ class Parameters:
 
 
 def checkAndAdjustAttributes(webhdfs, fileStatus, p):
-    if p.owner != None and p.owner != fileStatus.owner:
+    if p.owner != None and p.owner != fileStatus['owner']:
         p.changed = True
         if not p.check_mode: 
             webhdfs.setOwner(p.path, p.owner)
-    if p.group != None and p.group != fileStatus.group:
+    if p.group != None and p.group != fileStatus['group']:
         p.changed = True
         if not p.check_mode: 
             webhdfs.setGroup(p.path, p.group)
-    if(p.mode != None and fileStatus.permission != p.mode):
+    if(p.mode != None and fileStatus['permission'] != p.mode):
         p.changed = True
         if not p.check_mode: 
             webhdfs.setPermission(p.path, p.mode)
@@ -281,12 +269,12 @@ def checkCompletion(webhdfs, p):
         if p.state == State.ABSENT:
             error("Was unable to delete {0}", p.path)
         else:
-            if p.owner != None and fs.owner != p.owner:
-                error("Was unable to switch owner to {0}. Still {1}", p.owner, fs.owner) 
-            if p.group != None and fs.group != p.group:
-                error("Was unable to switch group to {0}. Still {1}", p.group, fs.group) 
-            if p.mode != None and fs.permission != p.mode:
-                error("Was unable to switch permission to {0}. Still {1}", p.mode, fs.permission) 
+            if p.owner != None and fs['owner'] != p.owner:
+                error("Was unable to switch owner to {0}. Still {1}", p.owner, fs['owner']) 
+            if p.group != None and fs['group'] != p.group:
+                error("Was unable to switch group to {0}. Still {1}", p.group, fs['group']) 
+            if p.mode != None and fs['permission'] != p.mode:
+                error("Was unable to switch permission to {0}. Still {1}", p.mode, fs['permission']) 
                 
                 
 def lookupWebHdfs(p):                
@@ -319,7 +307,6 @@ def lookupWebHdfs(p):
     else:
         return WebHDFS(p.webhdfsEndpoint, p.auth)
     
-                
                 
 def main():
     
@@ -415,16 +402,16 @@ def main():
             p.changed = True
             if not p.check_mode:
                 webhdfs.delete(p.path)
-        elif p.state == State.FILE and fileStatus.type == HdfsType.DIRECTORY:
+        elif p.state == State.FILE and fileStatus['type'] == HdfsType.DIRECTORY:
             error("Path '{0}' is a directory. Can't convert to a file", p.path)
-        elif p.state == State.DIRECTORY and fileStatus.type == HdfsType.FILE:
+        elif p.state == State.DIRECTORY and fileStatus['type'] == HdfsType.FILE:
             error("Path '{0}' is a file. Can't convert to a directory", p.path)
-        elif p.state == State.FILE and fileStatus.type == HdfsType.FILE:
+        elif p.state == State.FILE and fileStatus['type'] == HdfsType.FILE:
             checkAndAdjustAttributes(webhdfs, fileStatus, p)
-        elif p.state == State.DIRECTORY and fileStatus.type == HdfsType.DIRECTORY:
+        elif p.state == State.DIRECTORY and fileStatus['type'] == HdfsType.DIRECTORY:
             checkAndAdjustAttributes(webhdfs, fileStatus, p)
         else:
-            error("State mismatch: Requested:{0}  HDFS:{1}", p.state, fileStatus.type)
+            error("State mismatch: Requested:{0}  HDFS:{1}", p.state, fileStatus['type'])
     
     if not p.check_mode:
         checkCompletion(webhdfs, p)    

@@ -150,14 +150,6 @@ class WebHDFS:
                 return (False, "{0}  =>  Response code: {1}".format(url, resp.status))
         except Exception as e:
             return (False, "{0}  =>  Response code: {1}".format(url, e.strerror))
-                    
-    class FileStatus:
-        owner = None
-        group  = None
-        type = None
-        permission = None
-        def __str__(self):
-            return "FileStatus => owner: '{0}', group: '{1}',  type:'{2}', permission:'{3}'".format(self.owner, self.group, self.type, self.permission)
         
     def getFileStatus(self, path):
         url = "http://{0}/webhdfs/v1{1}?{2}op=GETFILESTATUS".format(self.endpoint, path, self.auth)
@@ -166,12 +158,7 @@ class WebHDFS:
         if resp.status == 200:
             #print content
             result = json.loads(content)
-            fileStatus = WebHDFS.FileStatus()
-            fileStatus.owner = result['FileStatus']['owner']
-            fileStatus.group = result['FileStatus']['group']
-            fileStatus.permission = result['FileStatus']['permission']
-            fileStatus.type = result['FileStatus']['type']
-            return fileStatus
+            return result['FileStatus']
         elif resp.status == 404:
             return None
         else:
@@ -272,11 +259,11 @@ def main():
             changed = False,
             hdfs_path = p.path,
             exists = True,
-            type = fileStatus.type.lower(),
-            owner = fileStatus.owner,
-            group = fileStatus.group,
-            mode = "0" + fileStatus.permission,
-            int_mode = int(fileStatus.permission, 8)
+            type = fileStatus['type'].lower(),
+            owner = fileStatus['owner'],
+            group = fileStatus['group'],
+            mode = "0" + fileStatus['permission'],
+            int_mode = int(fileStatus['permission'], 8)
         )
 
     
