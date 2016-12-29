@@ -25,8 +25,6 @@
 #
 #
 
-
-
 import datetime
 import shlex
 import os
@@ -139,13 +137,13 @@ EXAMPLES = '''
 
 # -------------------------------------------------------------HDFS ADD ON
 from xml.dom import minidom
-from distutils.version import LooseVersion
-HAS_HTTPLIB2 = False
-# Version check was performed in ansible uri module. So, perform it for safety
+
+
+HAS_REQUESTS = False
+
 try:
-    import httplib2
-    if LooseVersion(httplib2.__version__) >= LooseVersion('0.7'):
-        HAS_HTTPLIB2 = True
+    import requests
+    HAS_REQUESTS = True
 except ImportError, AttributeError:
     # AttributeError if __version__ is not present
     pass
@@ -173,9 +171,8 @@ class WebHDFS:
     def test(self):
         url = "http://{0}/webhdfs/v1/?{1}op=GETFILESTATUS".format(self.endpoint, self.auth)
         try:
-            h = httplib2.Http()
-            resp, _ = h.request(url, "GET")
-            if resp.status == 200:
+            resp = requests.get(url)
+            if resp.status_code == 200:
                 return (True, "")
             else: 
                 return (False, "{0}  =>  Response code: {1}".format(url, resp.status))
@@ -185,13 +182,12 @@ class WebHDFS:
         
     def getFileStatus(self, path):
         url = "http://{0}/webhdfs/v1{1}?{2}op=GETFILESTATUS".format(self.endpoint, path, self.auth)
-        h = httplib2.Http()
-        resp, content = h.request(url, "GET")
-        if resp.status == 200:
+        resp = requests.get(url)
+        if resp.status_code == 200:
             #print content
-            result = json.loads(content)
+            result = resp.json()
             return result['FileStatus']
-        elif resp.status == 404:
+        elif resp.status_code == 404:
             return None
         else:
             error("Invalid returned http code '{0}' when calling '{1}'",resp.status, url)
@@ -252,6 +248,9 @@ def main():
             # -------------- End of HDFS ADD ON
         )
     )
+    
+    if not HAS_REQUESTS:
+        module.fail_json(msg="python-requests module is not installed")    
 
     shell = module.params['uses_shell']
     chdir = module.params['chdir']
