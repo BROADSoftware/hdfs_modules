@@ -101,14 +101,10 @@ options:
         If not defined, will be looked up in local hdfs-site.xml
     required: false
     default: None
-  auth:
-    description:
-      - Define account to impersonate to perform required operation. Technically, 
-        this value will be inserted between the path and the C(op=XXXXX) value of 
-        the built URL. Refer to C(https://hadoop.apache.org/docs/current/hadoop-project-dist/hadoop-hdfs/WebHDFS.html#Authentication)
-        for more information.
+  hdfs_user:
+    description: Define account to impersonate to perform required operation on HDFS through WebHDFS.
     required: false
-    default: "user.name=hdfs"
+    default: "hdfs"
 author: 
     - Serge ALEXANDRE
     
@@ -152,11 +148,9 @@ except ImportError, AttributeError:
 module = None
 
 class WebHDFS:
-    def __init__(self, endpoint, auth):
-        if auth != "" and not auth.endswith("&"):
-            auth = auth + "&"
+    def __init__(self, endpoint, hdfsUser):
         self.endpoint = endpoint
-        self.auth = auth
+        self.auth = "user.name=" + hdfsUser + "&"
             
     def test(self):
         url = "http://{0}/webhdfs/v1/?{1}op=GETFILESTATUS".format(self.endpoint, self.auth)
@@ -283,7 +277,7 @@ def lookupWebHdfs(p):
                 error("Unable to find {0}* or {1}* in {2}. Provide explicit 'webhdfs_endpoint'", NN_HTTP_TOKEN1, NN_HTTP_TOKEN2, hspath)
             errors = []
             for endpoint in candidates:
-                webHDFS= WebHDFS(endpoint, p.auth)
+                webHDFS= WebHDFS(endpoint, p.hdfsUser)
                 (x, err) = webHDFS.test()
                 if x:
                     p.webhdfsEndpoint = webHDFS.endpoint
@@ -297,7 +291,7 @@ def lookupWebHdfs(p):
         candidates = p.webhdfsEndpoint.split(",")
         errors = []
         for endpoint in candidates:
-            webHDFS= WebHDFS(endpoint, p.auth)
+            webHDFS= WebHDFS(endpoint, p.hdfsUser)
             (x, err) = webHDFS.test()
             if x:
                 p.webhdfsEndpoint = webHDFS.endpoint
@@ -322,8 +316,7 @@ def main():
             default_mode = dict(required=False),
             hadoop_conf_dir = dict(required=False, default="/etc/hadoop/conf"),
             webhdfs_endpoint = dict(required=False, default=None),
-            auth = dict(required=False, default="user.name=hdfs")
-            
+            hdfs_user = dict(required=False, default="hdfs")
         ),
         supports_check_mode=True
     )
@@ -343,7 +336,7 @@ def main():
     p.default_mode = module.params['default_mode']
     p.hadoopConfDir = module.params['hadoop_conf_dir']
     p.webhdfsEndpoint = module.params['webhdfs_endpoint']
-    p.auth = module.params['auth']
+    p.hdfsUser = module.params['hdfs_user']
     p.check_mode = module.check_mode
 
     if p.mode != None:

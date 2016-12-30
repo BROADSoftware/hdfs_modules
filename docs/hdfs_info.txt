@@ -1,32 +1,28 @@
-> HDFS_INFO    
+> HDFS_INFO
 
   Allow testing of file/folder existence. And retrieve owner, group and mode of an existing file/folder on HDFS.
 
-Supported by: community
-
-Status: preview
-
 Options (= is mandatory):
 
-- auth
-        Define account to impersonate to perform required operation. Technically, this value will be inserted between the path and the `op=XXXXX' value of
-        the built URL. Refer to `https://hadoop.apache.org/docs/current/hadoop-project-dist/hadoop-hdfs/WebHDFS.html#Authentication' for more information.
-        [Default: user.name=hdfs]
 - hadoop_conf_dir
-        Where to find Haddop configuration file, specially hdfs-site.xml, in order to lookup WebHDFS endpoint (`dfs.namenode.http-address') Used only if
-        webhdfs_endpoint is not defined
-        [Default: /etc/hadoop/conf]
+        Where to find Haddop configuration file, specially hdfs-site.xml, in order to lookup WebHDFS endpoint (`dfs.namenode
+        .http-address') Used only if webhdfs_endpoint is not defined [Default: /etc/hadoop/conf]
+
 = hdfs_path
-        HDFS path to the file being managed.  Aliases: `dest', `name'
-        [Default: None]
+        HDFS path to the file being managed.  Aliases: `dest', `name' [Default: None]
+
+- hdfs_user
+        Define account to impersonate to perform required operation on HDFS through WebHDFS. [Default: hdfs]
+
 - webhdfs_endpoint
-        Provide WebHDFS REST API entry point. Typically `<namenodeHost>:50070'. It could also be a comma separated list of entry point, which will be checked
-        up to a valid one. This will allow Namenode H.A. handling. If not defined, will be looked up in local hdfs-site.xml
-        [Default: None]
-Notes:
-  * As HDFS is a distributed file system shared by all nodes of a cluster, this module must be launched on one node only. Note there is no protection
-        against race condition (Same operation performed simultaneously from several nodes).
-  * All HDFS operations are performed using WebHDFS REST API.
+        Provide WebHDFS REST API entry point. Typically `<namenodeHost>:50070'. It could also be a comma separated list of entry
+        point, which will be checked up to a valid one. This will allow Namenode H.A. handling. If not defined, will be looked
+        up in local hdfs-site.xml [Default: None]
+
+Notes:  As HDFS is a distributed file system shared by all nodes of a cluster, this module must be launched on one node only.
+        Note there is no protection against race condition (Same operation performed simultaneously from several nodes).
+        All HDFS operations are performed using WebHDFS REST API.
+
 EXAMPLES:
 
 
