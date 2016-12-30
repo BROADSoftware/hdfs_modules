@@ -51,6 +51,7 @@ options:
   webhdfs_endpoint:
     description:
       - Provide WebHDFS REST API entry point. Typically C(<namenodeHost>:50070). 
+        It could also be a comma separated list of entry point, which will be checked up to a valid one. This will allow Namenode H.A. handling. 
         If not defined, will be looked up in local hdfs-site.xml
     required: false
     default: None
@@ -138,9 +139,9 @@ class WebHDFS:
             if resp.status_code == 200:
                 return (True, "")
             else: 
-                return (False, "{0}  =>  Response code: {1}".format(url, resp.status))
+                return (False, "{0}  =>  Response code: {1}".format(url, resp.status_code))
         except Exception as e:
-            return (False, "{0}  =>  Response code: {1}".format(url, e.strerror))
+            return (False, "{0}  =>  Response code: {1}".format(url, str(e)))
         
     def getFileStatus(self, path):
         url = "http://{0}/webhdfs/v1{1}?{2}op=GETFILESTATUS".format(self.endpoint, path, self.auth)
@@ -152,7 +153,7 @@ class WebHDFS:
         elif resp.status_code == 404:
             return None
         else:
-            error("Invalid returned http code '{0}' when calling '{1}'",resp.status, url)
+            error("Invalid returned http code '{0}' when calling '{1}'",resp.status_code, url)
             
  
             
@@ -197,12 +198,22 @@ def lookupWebHdfs(p):
                     p.webhdfsEndpoint = webHDFS.endpoint
                     return webHDFS
                 else:
-                    errors.append("\n" + err)
-            error("Unable to find a valid 'webhdfs_endpoint' in hdfs-site.xml:" + err)
+                    errors.append(err)
+            error("Unable to find a valid 'webhdfs_endpoint' in hdfs-site.xml:" + str(errors))
         else:
             error("Unable to find file {0}. Provide 'webhdfs_endpoint' or 'hadoop_conf_dir' parameter", hspath)
     else:
-        return WebHDFS(p.webhdfsEndpoint, p.auth)
+        candidates = p.webhdfsEndpoint.split(",")
+        errors = []
+        for endpoint in candidates:
+            webHDFS= WebHDFS(endpoint, p.auth)
+            (x, err) = webHDFS.test()
+            if x:
+                p.webhdfsEndpoint = webHDFS.endpoint
+                return webHDFS
+            else:
+                errors.append(err)
+        error("Unable to find a valid 'webhdfs_endpoint' in: " + p.webhdfsEndpoint + " (" + str(errors) + ")")
     
                 
                 
