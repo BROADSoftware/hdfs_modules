@@ -42,17 +42,17 @@ description:
 options:
   cmd:
     description:
-      - the command to execute.
+      - The command to execute.
     required: true
     default: null
   hdfs_creates:
     description:
-      - an absolute HDFS path, when it already exists, this step will B(not) be run.
+      - An absolute HDFS path, when it already exists, this step will B(not) be run.
     required: no
     default: null
   hdfs_removes:
     description:
-      - an absolute HDFS path, when it does not exist, this step will B(not) be run.
+      - An absolute HDFS path, when it does not exist, this step will B(not) be run.
     version_added: "0.8"
     required: no
     default: null
@@ -67,7 +67,7 @@ options:
     default: null
   executable:
     description:
-      - change the shell used to execute the command. Should be an absolute path to the executable.
+      - Change the shell used to execute the command. Should be an absolute path to the executable.
     required: false
     default: null
     version_added: "0.9"

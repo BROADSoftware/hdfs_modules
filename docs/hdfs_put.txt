@@ -1,0 +1,89 @@
+> HDFS_PUT
+
+  The [put] module copies a file or a folder from the remote box to
+  HDFS.
+
+Options (= is mandatory):
+
+- backup
+        Create a backup file including the timestamp information so
+        you can get the original file back if you somehow clobbered it
+        incorrectly. (Choices: yes, no) [Default: no]
+
+- default_group
+        Name of the group that will own the file in case of creation.
+        Existing file will not be modified. [Default: None]
+
+- default_mode
+        Mode (Permission) the file will be set in case of creation.
+        Existing file will not be modified. [Default: None]
+
+- default_owner
+        Name of the user that will own the file in case of creation.
+        Existing file will not be modified. [Default: None]
+
+- directory_mode
+        When doing a recursive copy set the mode for the directories.
+        If this is not set we will use the system defaults. The mode
+        is only set on directories which are newly created, and will
+        not affect those that already existed.
+
+- follow
+        This flag indicates that filesystem links, if they exist,
+        should be followed. (Choices: yes, no) [Default: no]
+
+- force
+        the default is `yes', which will replace the remote file when
+        contents are different than the source. If `no', the file will
+        only be transferred if the destination does not exist.
+        (Choices: yes, no) [Default: yes]
+
+- group
+        Name of the group that will own the file, as would be fed by
+        HDFS 'FileSystem.setOwner' [Default: None]
+
+- hadoop_conf_dir
+        Where to find Hadoop configuration file, specially hdfs-
+        site.xml, in order to lookup WebHDFS endpoint (`dfs.namenode
+        .http-address') Used only if webhdfs_endpoint is not defined
+        [Default: /etc/hadoop/conf]
+
+= hdfs_dest
+        HDFS absolute path where the file should be copied to.  If it
+        is a directory, file will be copied into with its source name.
+        If not, this will be the target full path. If src is a
+        directory, this must be a directory too. [Default: None]
+
+- hdfs_user
+        Define account to impersonate to perform required operation on
+        HDFS through WebHDFS. [Default: hdfs]
+
+- mode
+        Mode (Permission) the file will be set, such as 0644 as would
+        be fed by HDFS 'FileSystem.setPermission' [Default: None]
+
+- owner
+        Name of the user that will own the file, as would be fed by
+        HDFS 'FileSystem.setOwner' [Default: None]
+
+= src
+        Path on the remote box to a file to copy to HDFS. Can be
+        absolute or relative. If path is a directory, it is copied
+        recursively. In this case, if path ends with "/", only inside
+        contents of that directory are copied to destination.
+        Otherwise, if it does not end with "/", the directory itself
+        with all contents is copied. This behavior is similar to
+        Rsync. [Default: None]
+
+- webhdfs_endpoint
+        Provide WebHDFS REST API entry point. Typically
+        `<namenodeHost>:50070'. It could also be a comma separated
+        list of entry point, which will be checked up to a valid one.
+        This will allow Namenode H.A. handling. If not defined, will
+        be looked up in local hdfs-site.xml [Default: None]
+
+EXAMPLES:
+
+
+
+MAINTAINERS: Serge ALEXANDRE

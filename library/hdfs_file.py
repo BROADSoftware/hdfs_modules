@@ -56,8 +56,7 @@ options:
     choices: [ file, directory, absent ]
   owner:
     description:
-      - Name of the user that will own the file/directory, as would
-        be fed by HDFS 'FileSystem.setOwner' 
+      - Name of the user that will own the file/directory, as would be fed by HDFS 'FileSystem.setOwner' 
     required: false
     default: None
   group:
