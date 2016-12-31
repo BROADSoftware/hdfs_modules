@@ -209,6 +209,9 @@ class WebHDFS:
         if not resp2.status_code == 201:
            error("Invalid returned http code '{0}' when calling '{1}'".format(resp2.status_code, url2))
            
+    def rename(self, hdfsPath, newName):
+        url = "http://{0}/webhdfs/v1{1}?{2}op=RENAME&destination={3}".format(self.endpoint, hdfsPath, self.auth, newName)
+        self.put(url)
            
     
     
@@ -319,6 +322,13 @@ def checkAndAdjustAttrOnExistingFile(webhdfs, fileStatus, p):
             webhdfs.setPermission(p.hdfs_dest, p.mode)
 
 
+def backupHdfsFile(webhdfs, path):
+    #ext = time.strftime("%Y-%m-%d@%H:%M:%S", time.localtime(time.time()))
+    ext = time.strftime("%Y-%m-%d_%H_%M_%S~", time.localtime(time.time()))
+    backupdest = '%s.%s' % (path, ext)
+    webhdfs.rename(path, backupdest)
+    
+
                 
 def main():
     
@@ -381,6 +391,7 @@ def main():
             # Target is a directory. Recompute effective target
             p.hdfs_dest = os.path.join(p.hdfs_dest, os.path.basename(p.src))
             destStatus = webhdfs.getFileStatus(p.hdfs_dest)
+            
         if destStatus == None:
             # hdfs_dest does not exist. Ensure base dir exists
             destBasedir = os.path.dirname(p.hdfs_dest)
@@ -417,7 +428,8 @@ def main():
 
 
     module.exit_json(changed=p.changed)
-    
+
+        
 
 from ansible.module_utils.basic import *
 
