@@ -17,7 +17,9 @@
 # along with this software. If not, see <http://www.gnu.org/licenses/>.
 
 
-from xml.dom import minidom
+# TRICK:
+# To debug exchange, on the namenode:
+# ngrep -q -d eth0 -W normal  port 50070
 
 DOCUMENTATION = '''
 ---
@@ -34,12 +36,15 @@ options:
         with "/", only inside contents of that directory are copied to destination.
         Otherwise, if it does not end with "/", the directory itself with all contents
         is copied. This behavior is similar to Rsync.
+        When a file is copied, target modification time is adjusted to the source value.
     required: true
     default: null
     aliases: []
   hdfs_dest:
     description:
-      - HDFS absolute path where the file should be copied to.  If it is a directory, file will be copied into with its source name. If not, this will be the target full path.
+      - HDFS absolute path where the file should be copied to.  
+        If it is a directory, file will be copied into with its source name. 
+        If not, this will be the target full path. In this case, dirname must exist
         If src is a directory, this must be a directory too.
     required: true
     default: null
@@ -52,7 +57,7 @@ options:
     default: "no"
   force:
     description:
-      - the default is C(yes), which will replace the remote file when contents are different than the source. 
+      - the default is C(yes), which will replace the remote file when size or modification time is different from the source. 
         If C(no), the file will only be transferred if the destination does not exist.
     required: false
     choices: [ "yes", "no" ]
@@ -63,12 +68,6 @@ options:
         defaults. The mode is only set on directories which are newly created, and will not affect those that
         already existed.
     required: false
-  follow:
-    required: false
-    default: "no"
-    choices: [ "yes", "no" ]
-    description:
-      - 'This flag indicates that filesystem links, if they exist, should be followed.'
   owner:
     description:
       - Name of the user that will own the file, as would be fed by HDFS 'FileSystem.setOwner' 
@@ -128,7 +127,7 @@ EXAMPLES = '''
 
 '''
 
-
+from xml.dom import minidom
 
 HAS_REQUESTS = False
 
@@ -194,12 +193,32 @@ class WebHDFS:
     def setPermission(self, path, permission):
         url = "http://{0}/webhdfs/v1{1}?{2}op=SETPERMISSION&permission={3}".format(self.endpoint, path, self.auth, permission)
         self.put(url)
+
+    def setModificationTime(self, hdfsPath, modTime):
+        url = "http://{0}/webhdfs/v1{1}?{2}op=SETTIMES&modificationtime={3}".format(self.endpoint, hdfsPath, self.auth, long(modTime)*1000)
+        self.put(url)
+
+    def putFileToHdfs(self, localPath, hdfsPath):
+        url = "http://{0}/webhdfs/v1{1}?{2}op=CREATE&overwrite=true".format(self.endpoint, hdfsPath, self.auth)
+        resp = requests.put(url, allow_redirects=False)
+        if not resp.status_code == 307:
+            error("Invalid returned http code '{0}' when calling '{1}'".format(resp.status_code, url))
+        url2 = resp.headers['location']    
+        f = open(localPath, "rb")
+        resp2 = requests.put(url2, data=f, headers={'content-type': 'application/octet-stream'})
+        if not resp2.status_code == 201:
+           error("Invalid returned http code '{0}' when calling '{1}'".format(resp2.status_code, url2))
+           
+           
+    
     
 
 def error(message, *args):
     x = "" + message.format(*args)
     module.fail_json(msg = x)    
 
+class Parameters:
+    pass
                 
                 
 def lookupWebHdfs(p):                
@@ -219,7 +238,7 @@ def lookupWebHdfs(p):
                 error("Unable to find {0}* or {1}* in {2}. Provide explicit 'webhdfs_endpoint'", NN_HTTP_TOKEN1, NN_HTTP_TOKEN2, hspath)
             errors = []
             for endpoint in candidates:
-                webHDFS= WebHDFS(endpoint, p.hdfsUser)
+                webHDFS= WebHDFS(endpoint, p.hdfs_user)
                 (x, err) = webHDFS.test()
                 if x:
                     p.webhdfsEndpoint = webHDFS.endpoint
@@ -233,7 +252,7 @@ def lookupWebHdfs(p):
         candidates = p.webhdfsEndpoint.split(",")
         errors = []
         for endpoint in candidates:
-            webHDFS= WebHDFS(endpoint, p.hdfsUser)
+            webHDFS= WebHDFS(endpoint, p.hdfs_user)
             (x, err) = webHDFS.test()
             if x:
                 p.webhdfsEndpoint = webHDFS.endpoint
@@ -242,6 +261,64 @@ def lookupWebHdfs(p):
                 errors.append(err)
         error("Unable to find a valid 'webhdfs_endpoint' in: " + p.webhdfsEndpoint + " (" + str(errors) + ")")
     
+
+def checkParameters(p):
+    if not os.path.exists(p.src):
+        module.fail_json(msg="Source %s not found" % (p.src))
+    if not os.access(p.src, os.R_OK):
+        module.fail_json(msg="Source %s not readable" % (p.src))
+    if p.mode != None:
+        if not isinstance(p.mode, int):
+            try:
+                p.mode = int(p.mode, 8)
+            except Exception:
+                error("mode must be in octal form")
+        p.mode = oct(p.mode).lstrip("0")
+        #print '{ mode_type: "' + str(type(p.mode)) + '",  mode_value: "' + str(p.mode) + '"}'
+    if p.default_mode != None:
+        if not isinstance(p.default_mode, int):
+            try:
+                p.default_mode = int(p.default_mode, 8)
+            except Exception:
+                error("default_mode must be in octal form")
+        p.default_mode = oct(p.default_mode).lstrip("0")
+    if(p.owner != None and p.default_owner != None):
+        error("There is no reason to define both owner and default_owner")
+    if(p.group != None and p.default_group != None):
+        error("There is no reason to define both group and default_group")
+    if(p.mode != None and p.default_mode != None):
+        error("There is no reason to define both mode and default_mode")
+
+    if not p.hdfs_dest.startswith("/"):
+        error("hdfs_dest '{0}' is not absolute. Absolute path is required!", p.path)
+
+def applyAttrOnNewFile(webhdfs, path, p):
+    owner = p.default_owner if p.owner is None else p.owner
+    group = p.default_group if p.group is None else p.group
+    mode = p.default_mode if p.mode is None else p.mode
+    if owner != None:
+        webhdfs.setOwner(path, owner)
+    if group != None:
+        webhdfs.setGroup(path, group)
+    if mode != None:
+        webhdfs.setPermission(path, mode)
+
+
+def checkAndAdjustAttrOnExistingFile(webhdfs, fileStatus, p):
+    if p.owner != None and p.owner != fileStatus['owner']:
+        p.changed = True
+        if not p.check_mode: 
+            webhdfs.setOwner(p.hdfs_dest, p.owner)
+    if p.group != None and p.group != fileStatus['group']:
+        p.changed = True
+        if not p.check_mode: 
+            webhdfs.setGroup(p.hdfs_dest, p.group)
+    if(p.mode != None and fileStatus['permission'] != p.mode):
+        p.changed = True
+        if not p.check_mode: 
+            webhdfs.setPermission(p.hdfs_dest, p.mode)
+
+
                 
 def main():
     
@@ -270,9 +347,8 @@ def main():
     if not HAS_REQUESTS:
         module.fail_json(msg="python-requests module is not installed")    
 
-    
     p = Parameters()
-    p.backup = module.param['backup']
+    p.backup = module.params['backup']
     p.default_group = module.params['default_group']
     p.default_mode = module.params['default_mode']
     p.default_owner = module.params['default_owner']
@@ -290,12 +366,61 @@ def main():
 
     p.check_mode = module.check_mode
     p.changed = False
+
+    checkParameters(p)
     
+    webhdfs = lookupWebHdfs(p)
+    
+    destStatus = webhdfs.getFileStatus(p.hdfs_dest)
+    
+    #print(destStatus)
+            
+    if not os.path.isdir(p.src):
+        # Source is a simple file
+        if destStatus != None and destStatus['type'] == 'DIRECTORY':
+            # Target is a directory. Recompute effective target
+            p.hdfs_dest = os.path.join(p.hdfs_dest, os.path.basename(p.src))
+            destStatus = webhdfs.getFileStatus(p.hdfs_dest)
+        if destStatus == None:
+            # hdfs_dest does not exist. Ensure base dir exists
+            destBasedir = os.path.dirname(p.hdfs_dest)
+            destBaseDirStatus = webhdfs.getFileStatus(destBasedir)
+            if destBaseDirStatus == None or destBaseDirStatus['type'] != 'DIRECTORY':
+                error("Destination directory {0} does not exist", destBasedir)
+            p.changed = True
+            if not p.check_mode:
+                webhdfs.putFileToHdfs(p.src, p.hdfs_dest)
+                webhdfs.setModificationTime(p.hdfs_dest, int(os.stat(p.src).st_mtime))
+                applyAttrOnNewFile(webhdfs, p.hdfs_dest, p)
+        elif destStatus['type'] == 'FILE':
+            stat = os.stat(p.src)
+            if p.force and (stat.st_size != destStatus['length'] or  int(stat.st_mtime) != destStatus['modificationTime']/1000):
+                #print("{{ statst_size: {0}, destStatus_length: {1}, int_stat_st_mtime: {2}, estStatus_modificationTime_1000: {3} }}".format(stat.st_size, destStatus['length'], int(stat.st_mtime), destStatus['modificationTime']/100))
+                # File changed. Must be copied again
+                p.changed = True
+                if not p.check_mode:
+                    if p.backup:
+                        backupHdfsFile(webhdfs, p.hdfs_dest)
+                    webhdfs.putFileToHdfs(p.src, p.hdfs_dest)
+                    webhdfs.setModificationTime(p.hdfs_dest, int(stat.st_mtime))
+                    applyAttrOnNewFile(webhdfs, p.hdfs_dest, p)
+            else:
+                checkAndAdjustAttrOnExistingFile(webhdfs, destStatus, p)
+        elif destStatus['type'] == 'DIRECTORY':
+            error("hdfs_dest '{0}' is a directory. Must be a file or not existing", p.hdfs_dest)
+        else:
+            error("Unknown type '{0}' for hdfs_dest '{1}'", destStatus['type'], p.hdfs_dest)
+    else:
+        # Handle source is folder case
+        error("Source is folder: Not yet implemented")
+
+
 
     module.exit_json(changed=p.changed)
     
 
 from ansible.module_utils.basic import *
+
 if __name__ == '__main__':
     main()
 

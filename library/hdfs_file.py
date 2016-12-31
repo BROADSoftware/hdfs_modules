@@ -222,7 +222,7 @@ def error(message, *args):
 
 
 class Parameters:
-    changed = False
+    pass
 
 
 def checkAndAdjustAttributes(webhdfs, fileStatus, p):
@@ -337,6 +337,8 @@ def main():
     p.webhdfsEndpoint = module.params['webhdfs_endpoint']
     p.hdfsUser = module.params['hdfs_user']
     p.check_mode = module.check_mode
+    p.changed = False
+
 
     if p.mode != None:
         if not isinstance(p.mode, int):

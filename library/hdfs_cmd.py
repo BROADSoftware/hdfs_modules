@@ -152,7 +152,7 @@ except ImportError, AttributeError:
 module = None
 
 class Parameters:
-    changed = False
+    pass
 
 
 def error(message, *args):
@@ -280,6 +280,7 @@ def main():
     p.hadoopConfDir = module.params['hadoop_conf_dir']
     p.webhdfsEndpoint = module.params['webhdfs_endpoint']
     p.hdfsUser = module.params['hdfs_user']
+    p.changed = False
    
     webhdfs = lookupWebHdfs(p)
     

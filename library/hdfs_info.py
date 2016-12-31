@@ -106,6 +106,16 @@ int_mode:
     returned: if exists
     type: int
     sample: 493
+size:
+    description: Size of the file
+    returned: always
+    type: integer
+    sample: 2354
+modificationTime:
+    description: Last modification time, in second since Epoch
+    returned: always
+    type: integer
+    sample: 1483097882
 '''
 
 HAS_REQUESTS = False
@@ -167,7 +177,7 @@ def error(message, *args):
 
 
 class Parameters:
-    changed = False
+    pass
      
 def lookupWebHdfs(p):                
     if p.webhdfsEndpoint == None:
@@ -233,6 +243,7 @@ def main():
     p.hadoopConfDir = module.params['hadoop_conf_dir']
     p.webhdfsEndpoint = module.params['webhdfs_endpoint']
     p.hdfsUser = module.params['hdfs_user']
+    p.changed = False
 
 
     if not p.path.startswith("/"):
@@ -258,7 +269,9 @@ def main():
             owner = fileStatus['owner'],
             group = fileStatus['group'],
             mode = "0" + fileStatus['permission'],
-            int_mode = int(fileStatus['permission'], 8)
+            int_mode = int(fileStatus['permission'], 8),
+            modificationTime = fileStatus['modificationTime']/1000,
+            size = fileStatus['length']
         )
 
     

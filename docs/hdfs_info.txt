@@ -74,6 +74,16 @@ int_mode:
     returned: if exists
     type: int
     sample: 493
+size:
+    description: Size of the file
+    returned: always
+    type: integer
+    sample: 2354
+modificationTime:
+    description: Last modification time, in second since Epoch
+    returned: always
+    type: integer
+    sample: 1483097882
 
 
 MAINTAINERS: Serge ALEXANDRE
