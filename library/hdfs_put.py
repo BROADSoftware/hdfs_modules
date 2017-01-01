@@ -350,15 +350,15 @@ def applyAttrOnNewFile(webhdfs, path, p):
 def checkAndAdjustAttrOnExistingFile(webhdfs, fileStatus, p):
     if p.owner != None and p.owner != fileStatus['owner']:
         p.changed = True
-        if not p.check_mode: 
+        if not p.checkMode: 
             webhdfs.setOwner(p.hdfsDest, p.owner)
     if p.group != None and p.group != fileStatus['group']:
         p.changed = True
-        if not p.check_mode: 
+        if not p.checkMode: 
             webhdfs.setGroup(p.hdfsDest, p.group)
     if(p.mode != None and fileStatus['permission'] != p.mode):
         p.changed = True
-        if not p.check_mode: 
+        if not p.checkMode: 
             webhdfs.setPermission(p.hdfsDest, p.mode)
 
 
@@ -477,7 +477,7 @@ def main():
     p.src = module.params['src']
     p.webhdfsEndpoint = module.params['webhdfs_endpoint']
 
-    p.check_mode = module.check_mode
+    p.checkMode = module.check_mode
     p.changed = False
 
     checkParameters(p)
@@ -502,7 +502,7 @@ def main():
             if destBaseDirStatus == None or destBaseDirStatus['type'] != 'DIRECTORY':
                 error("Destination directory {0} does not exist", destBasedir)
             p.changed = True
-            if not p.check_mode:
+            if not p.checkMode:
                 webhdfs.putFileToHdfs(p.src, p.hdfsDest)
                 webhdfs.setModificationTime(p.hdfsDest, int(os.stat(p.src).st_mtime))
                 applyAttrOnNewFile(webhdfs, p.hdfsDest, p)
@@ -512,7 +512,7 @@ def main():
                 #print("{{ statst_size: {0}, destStatus_length: {1}, int_stat_st_mtime: {2}, estStatus_modificationTime_1000: {3} }}".format(stat.st_size, destStatus['length'], int(stat.st_mtime), destStatus['modificationTime']/100))
                 # File changed. Must be copied again
                 p.changed = True
-                if not p.check_mode:
+                if not p.checkMode:
                     if p.backup:
                         backupHdfsFile(webhdfs, p.hdfsDest)
                     webhdfs.putFileToHdfs(p.src, p.hdfsDest)

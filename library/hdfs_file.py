@@ -228,15 +228,15 @@ class Parameters:
 def checkAndAdjustAttributes(webhdfs, fileStatus, p):
     if p.owner != None and p.owner != fileStatus['owner']:
         p.changed = True
-        if not p.check_mode: 
+        if not p.checkMode: 
             webhdfs.setOwner(p.path, p.owner)
     if p.group != None and p.group != fileStatus['group']:
         p.changed = True
-        if not p.check_mode: 
+        if not p.checkMode: 
             webhdfs.setGroup(p.path, p.group)
     if(p.mode != None and fileStatus['permission'] != p.mode):
         p.changed = True
-        if not p.check_mode: 
+        if not p.checkMode: 
             webhdfs.setPermission(p.path, p.mode)
 
 
@@ -330,13 +330,13 @@ def main():
     p.owner = module.params['owner']
     p.group = module.params['group']
     p.mode = module.params['mode']
-    p.default_owner = module.params['default_owner']
-    p.default_group = module.params['default_group']
-    p.default_mode = module.params['default_mode']
+    p.defaultOwner = module.params['default_owner']
+    p.defaultGroup = module.params['default_group']
+    p.defaultMode = module.params['default_mode']
     p.hadoopConfDir = module.params['hadoop_conf_dir']
     p.webhdfsEndpoint = module.params['webhdfs_endpoint']
     p.hdfsUser = module.params['hdfs_user']
-    p.check_mode = module.check_mode
+    p.checkMode = module.check_mode
     p.changed = False
 
 
@@ -350,20 +350,20 @@ def main():
         p.mode = oct(p.mode).lstrip("0")
         #print '{ mode_type: "' + str(type(p.mode)) + '",  mode_value: "' + str(p.mode) + '"}'
 
-    if p.default_mode != None:
-        if not isinstance(p.default_mode, int):
+    if p.defaultMode != None:
+        if not isinstance(p.defaultMode, int):
             try:
-                p.default_mode = int(p.default_mode, 8)
+                p.defaultMode = int(p.defaultMode, 8)
             except Exception:
                 error("default_mode must be in octal form")
     
-        p.default_mode = oct(p.default_mode).lstrip("0")
+        p.defaultMode = oct(p.defaultMode).lstrip("0")
 
-    if(p.owner != None and p.default_owner != None):
+    if(p.owner != None and p.defaultOwner != None):
         error("There is no reason to define both owner and default_owner")
-    if(p.group != None and p.default_group != None):
+    if(p.group != None and p.defaultGroup != None):
         error("There is no reason to define both group and default_group")
-    if(p.mode != None and p.default_mode != None):
+    if(p.mode != None and p.defaultMode != None):
         error("There is no reason to define both mode and default_mode")
 
     if not p.path.startswith("/"):
@@ -379,10 +379,10 @@ def main():
             error("This module can only create Folder. State should be 'directory' and not '{0}'", p.state)
         else:
             p.changed = True
-            if not p.check_mode:
-                owner = p.default_owner if p.owner is None else p.owner
-                group = p.default_group if p.group is None else p.group
-                mode = p.default_mode if p.mode is None else p.mode
+            if not p.checkMode:
+                owner = p.defaultOwner if p.owner is None else p.owner
+                group = p.defaultGroup if p.group is None else p.group
+                mode = p.defaultMode if p.mode is None else p.mode
                 webhdfs.createFolder(p.path, mode)
                 if owner != None:
                     webhdfs.setOwner(p.path, owner)
@@ -393,7 +393,7 @@ def main():
             checkAndAdjustAttributes(webhdfs, fileStatus, p)
         elif p.state == State.ABSENT:
             p.changed = True
-            if not p.check_mode:
+            if not p.checkMode:
                 webhdfs.delete(p.path)
         elif p.state == State.FILE and fileStatus['type'] == HdfsType.DIRECTORY:
             error("Path '{0}' is a directory. Can't convert to a file", p.path)
@@ -406,7 +406,7 @@ def main():
         else:
             error("State mismatch: Requested:{0}  HDFS:{1}", p.state, fileStatus['type'])
     
-    if not p.check_mode:
+    if not p.checkMode:
         checkCompletion(webhdfs, p)    
     
     module.exit_json(changed=p.changed)
