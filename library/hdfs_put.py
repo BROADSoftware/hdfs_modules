@@ -125,6 +125,18 @@ author:
 
 EXAMPLES = '''
 
+  # ------------------------- Directory copy
+  # Let's say we have ../file/tree/file1.txt and /tmp/tree is an existing hdfs folder
+  
+  # The following will result in /tmp/tree/file1.txt in HDFS
+  - hdfs_copy: src=../files/tree/ hdfs_dest=/tmp/tree
+  
+  # The following will result in /tmp/tree/tree/file1.txt in HDFS (/tmp/tree is created if not existsing
+  - hdfs_copy: src=../files/tree hdfs_dest=/tmp/tree
+  
+  # The following will result in /tmp/aa/bb/cc/tree/file1.txt in HDFS (All intermediate directory are created with user u1 and mode 0750 if not existing)
+  - hdfs_copy: src=../files/tree hdfs_dest=/tmp/aa/bb/cc owner=u1 directory_mode=0750
+
 '''
 
 from xml.dom import minidom
@@ -213,6 +225,34 @@ class WebHDFS:
         url = "http://{0}/webhdfs/v1{1}?{2}op=RENAME&destination={3}".format(self.endpoint, hdfsPath, self.auth, newName)
         self.put(url)
            
+                            
+    def getDirContent(self, path):
+        url = "http://{0}/webhdfs/v1{1}?{2}op=LISTSTATUS".format(self.endpoint, path, self.auth)
+        resp = requests.get(url)
+        dirContent = {}
+        dirContent['status'] = "OK"
+        dirContent['files'] = []
+        dirContent['directories'] = []
+        if resp.status_code == 200:
+            result = resp.json()
+            for f in result['FileStatuses']['FileStatus']:
+                if f['type'] == 'FILE':
+                    fi = {}
+                    fi['name'] = f['pathSuffix']
+                    fi['size'] = f['length']
+                    fi['modificationTime'] = f['modificationTime']/1000
+                    dirContent['files'].append(fi)
+                elif f['type'] == 'DIRECTORY':
+                    dirContent['directories'].append(f['pathSuffix'])
+                else:
+                    error("Unknown directory entry type: {0}".format(f['type']))
+        elif resp.status_code == 404:
+            dirContent['status'] = "NOT_FOUND"
+        elif resp.status_code == 403:
+            dirContent['status'] = "NO_ACCESS"
+        else:
+            error("Invalid returned http code '{0}' when calling '{1}'".format(resp.status_code, url))
+        return dirContent
     
     
 
@@ -241,7 +281,7 @@ def lookupWebHdfs(p):
                 error("Unable to find {0}* or {1}* in {2}. Provide explicit 'webhdfs_endpoint'", NN_HTTP_TOKEN1, NN_HTTP_TOKEN2, hspath)
             errors = []
             for endpoint in candidates:
-                webHDFS= WebHDFS(endpoint, p.hdfs_user)
+                webHDFS= WebHDFS(endpoint, p.hdfsUser)
                 (x, err) = webHDFS.test()
                 if x:
                     p.webhdfsEndpoint = webHDFS.endpoint
@@ -255,7 +295,7 @@ def lookupWebHdfs(p):
         candidates = p.webhdfsEndpoint.split(",")
         errors = []
         for endpoint in candidates:
-            webHDFS= WebHDFS(endpoint, p.hdfs_user)
+            webHDFS= WebHDFS(endpoint, p.hdfsUser)
             (x, err) = webHDFS.test()
             if x:
                 p.webhdfsEndpoint = webHDFS.endpoint
@@ -278,27 +318,27 @@ def checkParameters(p):
                 error("mode must be in octal form")
         p.mode = oct(p.mode).lstrip("0")
         #print '{ mode_type: "' + str(type(p.mode)) + '",  mode_value: "' + str(p.mode) + '"}'
-    if p.default_mode != None:
-        if not isinstance(p.default_mode, int):
+    if p.defaultMode != None:
+        if not isinstance(p.defaultMode, int):
             try:
-                p.default_mode = int(p.default_mode, 8)
+                p.defaultMode = int(p.defaultMode, 8)
             except Exception:
                 error("default_mode must be in octal form")
-        p.default_mode = oct(p.default_mode).lstrip("0")
-    if(p.owner != None and p.default_owner != None):
+        p.defaultMode = oct(p.defaultMode).lstrip("0")
+    if(p.owner != None and p.defaultOwner != None):
         error("There is no reason to define both owner and default_owner")
-    if(p.group != None and p.default_group != None):
+    if(p.group != None and p.defaultGroup != None):
         error("There is no reason to define both group and default_group")
-    if(p.mode != None and p.default_mode != None):
+    if(p.mode != None and p.defaultMode != None):
         error("There is no reason to define both mode and default_mode")
 
-    if not p.hdfs_dest.startswith("/"):
+    if not p.hdfsDest.startswith("/"):
         error("hdfs_dest '{0}' is not absolute. Absolute path is required!", p.path)
 
 def applyAttrOnNewFile(webhdfs, path, p):
-    owner = p.default_owner if p.owner is None else p.owner
-    group = p.default_group if p.group is None else p.group
-    mode = p.default_mode if p.mode is None else p.mode
+    owner = p.defaultOwner if p.owner is None else p.owner
+    group = p.defaultGroup if p.group is None else p.group
+    mode = p.defaultMode if p.mode is None else p.mode
     if owner != None:
         webhdfs.setOwner(path, owner)
     if group != None:
@@ -311,15 +351,15 @@ def checkAndAdjustAttrOnExistingFile(webhdfs, fileStatus, p):
     if p.owner != None and p.owner != fileStatus['owner']:
         p.changed = True
         if not p.check_mode: 
-            webhdfs.setOwner(p.hdfs_dest, p.owner)
+            webhdfs.setOwner(p.hdfsDest, p.owner)
     if p.group != None and p.group != fileStatus['group']:
         p.changed = True
         if not p.check_mode: 
-            webhdfs.setGroup(p.hdfs_dest, p.group)
+            webhdfs.setGroup(p.hdfsDest, p.group)
     if(p.mode != None and fileStatus['permission'] != p.mode):
         p.changed = True
         if not p.check_mode: 
-            webhdfs.setPermission(p.hdfs_dest, p.mode)
+            webhdfs.setPermission(p.hdfsDest, p.mode)
 
 
 def backupHdfsFile(webhdfs, path):
@@ -328,6 +368,69 @@ def backupHdfsFile(webhdfs, path):
     backupdest = '%s.%s' % (path, ext)
     webhdfs.rename(path, backupdest)
     
+ 
+def buildHdfsTree(webHdfs, rroot):
+    tree = {}
+    if rroot == "/":
+        tree['slashTerminated'] = False
+        prefLen = len(rroot) 
+    else:
+        if rroot.endswith("/"):
+            rroot = rroot[:-1]
+            tree['slashTerminated'] = True
+        else :
+            tree['slashTerminated'] = False
+        prefLen = len(rroot) + 1
+    tree['rroot'] = rroot
+    fileMap = {}
+    noAccess = []
+    walkInHdfs(webHdfs, rroot, fileMap, noAccess, prefLen)
+    tree['files'] = fileMap
+    tree['noAccess'] = noAccess
+    return tree
+
+def walkInHdfs(webHdfs, current, fileMap, noAccess, prefLen):
+    dirContent = webHdfs.getDirContent(current)
+    if dirContent['status'] == "OK":
+        for f in dirContent['files']:
+            path = os.path.join(current, f['name'])[prefLen:]
+            del f['name']
+            fileMap[path] = f
+        for d in dirContent['directories']:
+            walkInHdfs(webHdfs, os.path.join(current, d), fileMap, noAccess, prefLen)
+    elif dirContent['status'] == "NO_ACCESS":
+        noAccess.append(current)
+    else:
+        error("Invalid DirContent status: {0} for path:'{1}'".format(dirContent.status, current)) 
+
+
+def buildLocalTree(rroot):
+    tree = {}
+    if rroot == "/":
+        tree['slashTerminated'] = False
+        prefLen = len(rroot) 
+    else:
+        if rroot.endswith("/"):
+            rroot = rroot[:-1]
+            tree['slashTerminated'] = True
+        else :
+            tree['slashTerminated'] = False
+        prefLen = len(rroot) + 1
+    tree['rroot'] = rroot
+    fileMap = {}
+    for root, _, files in os.walk(rroot, topdown=True, onerror=None, followlinks=False):
+        for fileName in files:
+            key = os.path.join(root, fileName)[prefLen:]
+            path = os.path.join(rroot, key)
+            stat = os.stat(path)
+            f = {}
+            f['size'] = stat.st_size
+            f['modificationTime'] = int(stat.st_mtime)
+            fileMap[key] = f
+    tree['files'] = fileMap
+    return tree
+
+
 
                 
 def main():
@@ -359,16 +462,16 @@ def main():
 
     p = Parameters()
     p.backup = module.params['backup']
-    p.default_group = module.params['default_group']
-    p.default_mode = module.params['default_mode']
-    p.default_owner = module.params['default_owner']
+    p.defaultGroup = module.params['default_group']
+    p.defaultMode = module.params['default_mode']
+    p.defaultOwner = module.params['default_owner']
     p.directory_mode = module.params['directory_mode']
     p.follow = module.params['follow']
     p.force = module.params['force']
     p.group = module.params['group']
     p.hadoopConfDir = module.params['hadoop_conf_dir']
-    p.hdfs_dest = module.params['hdfs_dest']
-    p.hdfs_user = module.params['hdfs_user']
+    p.hdfsDest = module.params['hdfs_dest']
+    p.hdfsUser = module.params['hdfs_user']
     p.mode = module.params['mode']
     p.owner = module.params['owner']
     p.src = module.params['src']
@@ -381,29 +484,29 @@ def main():
     
     webhdfs = lookupWebHdfs(p)
     
-    destStatus = webhdfs.getFileStatus(p.hdfs_dest)
+    destStatus = webhdfs.getFileStatus(p.hdfsDest)
     
     #print(destStatus)
             
     if not os.path.isdir(p.src):
-        # Source is a simple file
+        # -----------------------------------------------------------------------------------------------------Source is a simple file
         if destStatus != None and destStatus['type'] == 'DIRECTORY':
             # Target is a directory. Recompute effective target
-            p.hdfs_dest = os.path.join(p.hdfs_dest, os.path.basename(p.src))
-            destStatus = webhdfs.getFileStatus(p.hdfs_dest)
+            p.hdfsDest = os.path.join(p.hdfsDest, os.path.basename(p.src))
+            destStatus = webhdfs.getFileStatus(p.hdfsDest)
             
-        if destStatus == None:
+        if destStatus == None:  # -------------------------------------------------------- Target does not exist
             # hdfs_dest does not exist. Ensure base dir exists
-            destBasedir = os.path.dirname(p.hdfs_dest)
+            destBasedir = os.path.dirname(p.hdfsDest)
             destBaseDirStatus = webhdfs.getFileStatus(destBasedir)
             if destBaseDirStatus == None or destBaseDirStatus['type'] != 'DIRECTORY':
                 error("Destination directory {0} does not exist", destBasedir)
             p.changed = True
             if not p.check_mode:
-                webhdfs.putFileToHdfs(p.src, p.hdfs_dest)
-                webhdfs.setModificationTime(p.hdfs_dest, int(os.stat(p.src).st_mtime))
-                applyAttrOnNewFile(webhdfs, p.hdfs_dest, p)
-        elif destStatus['type'] == 'FILE':
+                webhdfs.putFileToHdfs(p.src, p.hdfsDest)
+                webhdfs.setModificationTime(p.hdfsDest, int(os.stat(p.src).st_mtime))
+                applyAttrOnNewFile(webhdfs, p.hdfsDest, p)
+        elif destStatus['type'] == 'FILE':  # --------------------------------------------- Target already exists. Check if we need to overwrite.
             stat = os.stat(p.src)
             if p.force and (stat.st_size != destStatus['length'] or  int(stat.st_mtime) != destStatus['modificationTime']/1000):
                 #print("{{ statst_size: {0}, destStatus_length: {1}, int_stat_st_mtime: {2}, estStatus_modificationTime_1000: {3} }}".format(stat.st_size, destStatus['length'], int(stat.st_mtime), destStatus['modificationTime']/100))
@@ -411,19 +514,24 @@ def main():
                 p.changed = True
                 if not p.check_mode:
                     if p.backup:
-                        backupHdfsFile(webhdfs, p.hdfs_dest)
-                    webhdfs.putFileToHdfs(p.src, p.hdfs_dest)
-                    webhdfs.setModificationTime(p.hdfs_dest, int(stat.st_mtime))
-                    applyAttrOnNewFile(webhdfs, p.hdfs_dest, p)
+                        backupHdfsFile(webhdfs, p.hdfsDest)
+                    webhdfs.putFileToHdfs(p.src, p.hdfsDest)
+                    webhdfs.setModificationTime(p.hdfsDest, int(stat.st_mtime))
+                    applyAttrOnNewFile(webhdfs, p.hdfsDest, p)
             else:
                 checkAndAdjustAttrOnExistingFile(webhdfs, destStatus, p)
         elif destStatus['type'] == 'DIRECTORY':
-            error("hdfs_dest '{0}' is a directory. Must be a file or not existing", p.hdfs_dest)
+            error("hdfs_dest '{0}' is a directory. Must be a file or not existing", p.hdfsDest)
         else:
-            error("Unknown type '{0}' for hdfs_dest '{1}'", destStatus['type'], p.hdfs_dest)
+            error("Unknown type '{0}' for hdfs_dest '{1}'", destStatus['type'], p.hdfsDest)
     else:
-        # Handle source is folder case
-        error("Source is folder: Not yet implemented")
+        # ----------------------------------------------------------------------------------------------- Source is a directory
+        if destStatus['type'] != 'DIRECTORY':
+            error("As src='{0}' is a directory, hdfs_dest={1} must be a directory", p.src, p.hdfsDest)
+        hdfsTree = buildHdfsTree(webhdfs, p.hdfsDest)
+        #print hdfsTree
+        localTree = buildLocalTree(p.src)
+        print localTree
 
 
 
