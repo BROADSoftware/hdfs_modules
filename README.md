@@ -22,11 +22,18 @@ These modules need the python-requests package to be present on the remote node.
 	  # Create a directory if it does not exist.
 	  # If already existing, adjust owner, group and mode if different.
 	  - hdfs_file: hdfs_path=/user/joe/some_directory owner=joe group=users mode=0755 state=directory
-	  # How to copy a file from the file system of the targeted host to HDF S
-      - hdfs_cmd: cmd="sudo -u joe hdfs dfs -put /etc/passwd /user/joe/passwd1" hdfs_creates=/user/joe/passwd1 uses_shell=True
-      #   And ajust owner, group and mode on the file
+
+	  # How to copy a file from the file system of the targeted host to HDFS
+      - hdfs_cmd: cmd="sudo -u joe hdfs dfs -put /etc/services /user/joe/services" hdfs_creates=/user/joe/passwd1 uses_shell=True
+
+      # And ajust owner, group and mode on the file
 	  - hdfs_file: hdfs_path=/user/joe/passwd1 owner=joe group=users mode=0644
 	
+	  # But, better to use hdfs_put for this copy
+	  - hdfs_put: src=/etc/services hdfs_dest=/usr/joe/services  owner=joe group=users mode=0644
+
+	  # Can also copy a folder recursively
+	  - hdfs_put: src=/etc/hadoop/conf/ hdfs_dest=/usr/joe/some_directory hdfs_user=joe
 
 # License
 

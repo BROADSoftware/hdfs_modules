@@ -261,6 +261,8 @@ def checkCompletion(webhdfs, p):
                 
 def lookupWebHdfs(p):                
     if p.webhdfsEndpoint == None:
+        if not os.path.isdir(p.hadoopConfDir):
+            error("{0} must be an existing folder, or --hadoopConfDir  or --webhdfsEndpoint provided as parameter.".format(p.hadoopConfDir))
         candidates = []
         hspath = os.path.join(p.hadoopConfDir, "hdfs-site.xml")
         NN_HTTP_TOKEN1 = "dfs.namenode.http-address"

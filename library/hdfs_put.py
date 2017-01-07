@@ -126,16 +126,14 @@ author:
 EXAMPLES = '''
 
   # ------------------------- Directory copy
-  # Let's say we have ../file/tree/file1.txt and /tmp/tree is an existing hdfs folder
+  # Let's say we have /tmp/file/tree/file1.txt on the remote node and /tmp/tree is an existing hdfs folder
   
   # The following will result in /tmp/tree/file1.txt in HDFS
-  - hdfs_copy: src=../files/tree/ hdfs_dest=/tmp/tree
+  - hdfs_copy: src=/tmp/files/tree/ hdfs_dest=/tmp/tree
   
-  # The following will result in /tmp/tree/tree/file1.txt in HDFS (/tmp/tree is created if not existsing
-  - hdfs_copy: src=../files/tree hdfs_dest=/tmp/tree
+  # The following will result in /tmp/tree/tree/file1.txt in HDFS (/tmp/tree/tree is created if not existsing
+  - hdfs_copy: src=/tmp/files/tree hdfs_dest=/tmp/tree
   
-  # The following will result in /tmp/aa/bb/cc/tree/file1.txt in HDFS (All intermediate directory are created with user u1 and mode 0750 if not existing)
-  - hdfs_copy: src=../files/tree hdfs_dest=/tmp/aa/bb/cc owner=u1 directory_mode=0750
 
 '''
 
@@ -170,17 +168,19 @@ class WebHDFS:
             return (False, "{0}  =>  Response code: {1}".format(url, str(e)))
         
 
-    def getFileStatus(self, path):
+    def getPathTypeAndStatus(self, path):
         url = "http://{0}/webhdfs/v1{1}?{2}op=GETFILESTATUS".format(self.endpoint, path, self.auth)
         resp = requests.get(url)
         if resp.status_code == 200:
-            #print content
-            result =  resp.json()
-            return result['FileStatus']
+            result = resp.json()
+            return (result['FileStatus']['type'], result['FileStatus'])
         elif resp.status_code == 404:
-            return None
+            return ("NOT_FOUND", None)
+        elif resp.status_code == 403:
+            return ("NO_ACCESS", None)
         else:
-            error("Invalid returned http code '{0}' when calling '{1}'",resp.status_code, url)
+            error("Invalid returned http code '{0}' when calling '{1}'".format(resp.status_code, url))
+     
             
     def put(self, url):
         resp = requests.put(url, allow_redirects=False)
@@ -210,8 +210,8 @@ class WebHDFS:
         url = "http://{0}/webhdfs/v1{1}?{2}op=SETTIMES&modificationtime={3}".format(self.endpoint, hdfsPath, self.auth, long(modTime)*1000)
         self.put(url)
 
-    def putFileToHdfs(self, localPath, hdfsPath):
-        url = "http://{0}/webhdfs/v1{1}?{2}op=CREATE&overwrite=true".format(self.endpoint, hdfsPath, self.auth)
+    def putFileToHdfs(self, localPath, hdfsPath, overwrite):
+        url = "http://{0}/webhdfs/v1{1}?{2}op=CREATE&overwrite={3}".format(self.endpoint, hdfsPath, self.auth, "true" if overwrite else "false")
         resp = requests.put(url, allow_redirects=False)
         if not resp.status_code == 307:
             error("Invalid returned http code '{0}' when calling '{1}'".format(resp.status_code, url))
@@ -241,9 +241,18 @@ class WebHDFS:
                     fi['name'] = f['pathSuffix']
                     fi['size'] = f['length']
                     fi['modificationTime'] = f['modificationTime']/1000
+                    fi['mode'] = "0" + f['permission']
+                    fi['owner'] = f['owner']
+                    fi['group'] = f['group']
                     dirContent['files'].append(fi)
                 elif f['type'] == 'DIRECTORY':
-                    dirContent['directories'].append(f['pathSuffix'])
+                    di = {}
+                    di['name'] = f['pathSuffix']
+                    #di['modificationTime'] = f['modificationTime']/1000
+                    di['mode'] = "0" + f['permission']
+                    di['owner'] = f['owner']
+                    di['group'] = f['group']
+                    dirContent['directories'].append(di)
                 else:
                     error("Unknown directory entry type: {0}".format(f['type']))
         elif resp.status_code == 404:
@@ -264,8 +273,10 @@ class Parameters:
     pass
                 
                 
-def lookupWebHdfs(p):                
+def lookupWebHdfs(p):      
     if p.webhdfsEndpoint == None:
+        if not os.path.isdir(p.hadoopConfDir):
+            error("{0} must be an existing folder, or --hadoopConfDir  or --webhdfsEndpoint provided as parameter.".format(p.hadoopConfDir))
         candidates = []
         hspath = os.path.join(p.hadoopConfDir, "hdfs-site.xml")
         NN_HTTP_TOKEN1 = "dfs.namenode.http-address"
@@ -316,7 +327,7 @@ def checkParameters(p):
                 p.mode = int(p.mode, 8)
             except Exception:
                 error("mode must be in octal form")
-        p.mode = oct(p.mode).lstrip("0")
+        p.mode = oct(p.mode)
         #print '{ mode_type: "' + str(type(p.mode)) + '",  mode_value: "' + str(p.mode) + '"}'
     if p.defaultMode != None:
         if not isinstance(p.defaultMode, int):
@@ -324,7 +335,7 @@ def checkParameters(p):
                 p.defaultMode = int(p.defaultMode, 8)
             except Exception:
                 error("default_mode must be in octal form")
-        p.defaultMode = oct(p.defaultMode).lstrip("0")
+        p.defaultMode = oct(p.defaultMode)
     if(p.owner != None and p.defaultOwner != None):
         error("There is no reason to define both owner and default_owner")
     if(p.group != None and p.defaultGroup != None):
@@ -346,20 +357,34 @@ def applyAttrOnNewFile(webhdfs, path, p):
     if mode != None:
         webhdfs.setPermission(path, mode)
 
+def applyAttrOnNewDirectory(webhdfs, path, p):
+    owner = p.defaultOwner if p.owner is None else p.owner
+    group = p.defaultGroup if p.group is None else p.group
+    if owner != None:
+        webhdfs.setOwner(path, owner)
+    if group != None:
+        webhdfs.setGroup(path, group)
 
-def checkAndAdjustAttrOnExistingFile(webhdfs, fileStatus, p):
+
+def adjustAttrOnExistingFile(webhdfs, filePath, fileStatus, p):
     if p.owner != None and p.owner != fileStatus['owner']:
-        p.changed = True
-        if not p.checkMode: 
-            webhdfs.setOwner(p.hdfsDest, p.owner)
+        webhdfs.setOwner(filePath, p.owner)
     if p.group != None and p.group != fileStatus['group']:
-        p.changed = True
-        if not p.checkMode: 
-            webhdfs.setGroup(p.hdfsDest, p.group)
-    if(p.mode != None and fileStatus['permission'] != p.mode):
-        p.changed = True
-        if not p.checkMode: 
-            webhdfs.setPermission(p.hdfsDest, p.mode)
+        webhdfs.setGroup(filePath, p.group)
+    if(p.mode != None and fileStatus['mode'] != p.mode):
+        webhdfs.setPermission(filePath, p.mode)
+
+
+def checkAttrOnExistingFile(fileStatus, p):
+    if p.owner != None and p.owner != fileStatus['owner']:
+        return True
+    if p.group != None and p.group != fileStatus['group']:
+        return True
+    if(p.mode != None and fileStatus['mode'] != p.mode):
+        #print("p.mode:{0}   fileStatus['mode']:{1}".format(p.mode, fileStatus['mode']))
+        return True
+    return False
+
 
 
 def backupHdfsFile(webhdfs, path):
@@ -368,40 +393,6 @@ def backupHdfsFile(webhdfs, path):
     backupdest = '%s.%s' % (path, ext)
     webhdfs.rename(path, backupdest)
     
- 
-def buildHdfsTree(webHdfs, rroot):
-    tree = {}
-    if rroot == "/":
-        tree['slashTerminated'] = False
-        prefLen = len(rroot) 
-    else:
-        if rroot.endswith("/"):
-            rroot = rroot[:-1]
-            tree['slashTerminated'] = True
-        else :
-            tree['slashTerminated'] = False
-        prefLen = len(rroot) + 1
-    tree['rroot'] = rroot
-    fileMap = {}
-    noAccess = []
-    walkInHdfs(webHdfs, rroot, fileMap, noAccess, prefLen)
-    tree['files'] = fileMap
-    tree['noAccess'] = noAccess
-    return tree
-
-def walkInHdfs(webHdfs, current, fileMap, noAccess, prefLen):
-    dirContent = webHdfs.getDirContent(current)
-    if dirContent['status'] == "OK":
-        for f in dirContent['files']:
-            path = os.path.join(current, f['name'])[prefLen:]
-            del f['name']
-            fileMap[path] = f
-        for d in dirContent['directories']:
-            walkInHdfs(webHdfs, os.path.join(current, d), fileMap, noAccess, prefLen)
-    elif dirContent['status'] == "NO_ACCESS":
-        noAccess.append(current)
-    else:
-        error("Invalid DirContent status: {0} for path:'{1}'".format(dirContent.status, current)) 
 
 
 def buildLocalTree(rroot):
@@ -418,7 +409,8 @@ def buildLocalTree(rroot):
         prefLen = len(rroot) + 1
     tree['rroot'] = rroot
     fileMap = {}
-    for root, _, files in os.walk(rroot, topdown=True, onerror=None, followlinks=False):
+    dirMap = {}
+    for root, dirs, files in os.walk(rroot, topdown=True, onerror=None, followlinks=False):
         for fileName in files:
             key = os.path.join(root, fileName)[prefLen:]
             path = os.path.join(rroot, key)
@@ -426,12 +418,77 @@ def buildLocalTree(rroot):
             f = {}
             f['size'] = stat.st_size
             f['modificationTime'] = int(stat.st_mtime)
+            f['mode'] = "0" + oct(stat.st_mode)[-3:]
             fileMap[key] = f
+        for dirName in dirs:
+            key = os.path.join(root, dirName)[prefLen:]
+            path = os.path.join(rroot, key)
+            stat = os.stat(path)
+            f = {}
+            f['mode'] = "0" + oct(stat.st_mode)[-3:]
+            dirMap[key] = f
     tree['files'] = fileMap
+    tree['directories'] = dirMap
+    return tree
+    
+    
+def buildHdfsTree(webHdfs, rroot):
+    tree = {}
+    if rroot == "/":
+        tree['slashTerminated'] = False
+        prefLen = len(rroot) 
+    else:
+        if rroot.endswith("/"):
+            rroot = rroot[:-1]
+            tree['slashTerminated'] = True
+        else :
+            tree['slashTerminated'] = False
+        prefLen = len(rroot) + 1
+    tree['rroot'] = rroot
+    fileMap = {}
+    dirMap = {}
+    noAccess = []
+    walkInHdfs(webHdfs, rroot, dirMap, fileMap, noAccess, prefLen)
+    tree['files'] = fileMap
+    tree['directories'] = dirMap
+    tree['noAccess'] = noAccess
     return tree
 
+def walkInHdfs(webHdfs, current, dirMap, fileMap, noAccess, prefLen):
+    dirContent = webHdfs.getDirContent(current)
+    #print misc.pprint2s(dirContent)
+    if dirContent['status'] == "OK":
+        for f in dirContent['files']:
+            path = os.path.join(current, f['name'])[prefLen:]
+            del f['name']
+            fileMap[path] = f
+        for d in dirContent['directories']:
+            #print misc.pprint2s(d)
+            path = os.path.join(current, d['name'])
+            del d['name']
+            dirMap[path[prefLen:]] = d
+            walkInHdfs(webHdfs, path, dirMap, fileMap, noAccess, prefLen)
+    elif dirContent['status'] == "NO_ACCESS":
+        noAccess.append(current)
+    else:
+        error("Invalid DirContent status: {0} for path:'{1}'".format(dirContent.status, current)) 
 
 
+def buildEmptyTree(rroot):
+        tree = {}
+        tree['files'] = {}
+        tree['directories'] = {}
+        tree['noAccess'] = []
+        if rroot == "/":
+            tree['slashTerminated'] = False
+        else:
+            if rroot.endswith("/"):
+                rroot = rroot[:-1]
+                tree['slashTerminated'] = True
+            else :
+                tree['slashTerminated'] = False
+        tree['rroot'] = rroot
+        return tree       
                 
 def main():
     
@@ -443,7 +500,6 @@ def main():
             default_mode = dict(required=False, default=None),
             default_owner = dict(required=False, default=None),
             directory_mode = dict(required=False, default=None),
-            follow = dict(required=False, type='bool', default=False),
             force = dict(required=False, type='bool', default=True),
             group = dict(required=False, default=None),
             hadoop_conf_dir = dict(required=False, default="/etc/hadoop/conf"),
@@ -465,8 +521,7 @@ def main():
     p.defaultGroup = module.params['default_group']
     p.defaultMode = module.params['default_mode']
     p.defaultOwner = module.params['default_owner']
-    p.directory_mode = module.params['directory_mode']
-    p.follow = module.params['follow']
+    p.directoryMode = module.params['directory_mode']
     p.force = module.params['force']
     p.group = module.params['group']
     p.hadoopConfDir = module.params['hadoop_conf_dir']
@@ -482,31 +537,31 @@ def main():
 
     checkParameters(p)
     
-    webhdfs = lookupWebHdfs(p)
+    webHDFS = lookupWebHdfs(p)
     
-    destStatus = webhdfs.getFileStatus(p.hdfsDest)
+    (destPathType,  destStatus) = webHDFS.getPathTypeAndStatus(p.hdfsDest)
     
-    #print(destStatus)
+    #print(destPathType)
             
     if not os.path.isdir(p.src):
         # -----------------------------------------------------------------------------------------------------Source is a simple file
-        if destStatus != None and destStatus['type'] == 'DIRECTORY':
+        if destPathType == 'DIRECTORY':
             # Target is a directory. Recompute effective target
             p.hdfsDest = os.path.join(p.hdfsDest, os.path.basename(p.src))
-            destStatus = webhdfs.getFileStatus(p.hdfsDest)
+            (destPathType,  destStatus) = webHDFS.getPathTypeAndStatus(p.hdfsDest)
             
-        if destStatus == None:  # -------------------------------------------------------- Target does not exist
+        if destPathType == "NOT_FOUND":  # -------------------------------------------------------- Target does not exist
             # hdfs_dest does not exist. Ensure base dir exists
             destBasedir = os.path.dirname(p.hdfsDest)
-            destBaseDirStatus = webhdfs.getFileStatus(destBasedir)
-            if destBaseDirStatus == None or destBaseDirStatus['type'] != 'DIRECTORY':
+            (destBaseDirType, _) = webHDFS.getPathTypeAndStatus(destBasedir)
+            if destBaseDirType != 'DIRECTORY':
                 error("Destination directory {0} does not exist", destBasedir)
             p.changed = True
             if not p.checkMode:
-                webhdfs.putFileToHdfs(p.src, p.hdfsDest)
-                webhdfs.setModificationTime(p.hdfsDest, int(os.stat(p.src).st_mtime))
-                applyAttrOnNewFile(webhdfs, p.hdfsDest, p)
-        elif destStatus['type'] == 'FILE':  # --------------------------------------------- Target already exists. Check if we need to overwrite.
+                webHDFS.putFileToHdfs(p.src, p.hdfsDest, False)
+                webHDFS.setModificationTime(p.hdfsDest, int(os.stat(p.src).st_mtime))
+                applyAttrOnNewFile(webHDFS, p.hdfsDest, p)
+        elif destPathType == 'FILE':  # --------------------------------------------- Target already exists. Check if we need to overwrite.
             stat = os.stat(p.src)
             if p.force and (stat.st_size != destStatus['length'] or  int(stat.st_mtime) != destStatus['modificationTime']/1000):
                 #print("{{ statst_size: {0}, destStatus_length: {1}, int_stat_st_mtime: {2}, estStatus_modificationTime_1000: {3} }}".format(stat.st_size, destStatus['length'], int(stat.st_mtime), destStatus['modificationTime']/100))
@@ -514,30 +569,121 @@ def main():
                 p.changed = True
                 if not p.checkMode:
                     if p.backup:
-                        backupHdfsFile(webhdfs, p.hdfsDest)
-                    webhdfs.putFileToHdfs(p.src, p.hdfsDest)
-                    webhdfs.setModificationTime(p.hdfsDest, int(stat.st_mtime))
-                    applyAttrOnNewFile(webhdfs, p.hdfsDest, p)
+                        backupHdfsFile(webHDFS, p.hdfsDest)
+                    webHDFS.putFileToHdfs(p.src, p.hdfsDest, True)
+                    webHDFS.setModificationTime(p.hdfsDest, int(stat.st_mtime))
+                    applyAttrOnNewFile(webHDFS, p.hdfsDest, p)
             else:
-                checkAndAdjustAttrOnExistingFile(webhdfs, destStatus, p)
-        elif destStatus['type'] == 'DIRECTORY':
+                if checkAttrOnExistingFile(destStatus, p):
+                    p.changed = True
+                    if not p.checkMode:
+                        adjustAttrOnExistingFile(webHDFS, p.hdfsDest, destStatus, p)
+        elif destPathType == 'DIRECTORY':
             error("hdfs_dest '{0}' is a directory. Must be a file or not existing", p.hdfsDest)
         else:
-            error("Unknown type '{0}' for hdfs_dest '{1}'", destStatus['type'], p.hdfsDest)
+            error("Unknown type '{0}' for hdfs_dest '{1}'", destPathType, p.hdfsDest)
     else:
-        # ----------------------------------------------------------------------------------------------- Source is a directory
-        if destStatus['type'] != 'DIRECTORY':
-            error("As src='{0}' is a directory, hdfs_dest={1} must be a directory", p.src, p.hdfsDest)
-        hdfsTree = buildHdfsTree(webhdfs, p.hdfsDest)
-        #print hdfsTree
-        localTree = buildLocalTree(p.src)
-        print localTree
-
-
+        # ----------------------------------------------------------------------------------------------- Source is a directory. Use copy by mirroring
+        if destPathType == "NOT_FOUND":
+           error("Path {0} non existing on HDFS", p.hdfsDest)
+        if destPathType == "FILE":
+           error("HDFS path {0} is a file. Must be a directory", p.hdfsDest)
+        elif destPathType == "NO_ACCESS":
+            error("HDFS path {0}: No access", p.hdfsDest)
+        elif destPathType != "DIRECTORY":
+            error("HDFS path {0}: Unknown type: '{1}'", p.hdfsDest, ft)
+        
+        handlePutByMirroring(webHDFS, p)
 
     module.exit_json(changed=p.changed)
 
-        
+
+
+
+
+
+def handlePutByMirroring(webHDFS, p):    
+    srcTree = buildLocalTree(p.src)
+
+    directoriesToCreate = []
+    filesToCreate = []
+    filesToReplace = []
+    filesToAdjust = []
+
+    # If source does not end with '/', its basename will be added to target path. And directory created if not existing
+    if not srcTree['slashTerminated']:
+        x = os.path.basename(srcTree['rroot'])
+        p.hdfsDest = os.path.join(p.hdfsDest, x)
+        (ft, _) = webHDFS.getPathTypeAndStatus(p.hdfsDest)
+        if ft == "NOT_FOUND":
+            directoriesToCreate.append(p.hdfsDest)
+            destTree = buildEmptyTree(p.hdfsDest)
+        elif ft == "DIRECTORY":
+            destTree = buildHdfsTree(webHDFS, p.hdfsDest)
+        else:
+            error("HDFS path {0}: Invalid type: '{1}'", p.hdfsDest, ft)
+    else:
+        destTree = buildHdfsTree(webHDFS, p.hdfsDest)
+    
+    # Lookup all folder to create on target
+    for dirName in srcTree['directories']:
+        if dirName not in destTree['directories']:
+            dirPath = os.path.join(destTree['rroot'], dirName)
+            directoriesToCreate.append(dirPath)
+               
+    directoriesToCreate.sort()
+
+    for fileName in srcTree['files']:
+        if fileName in destTree['files']:
+            srcFilesStatus = srcTree['files'][fileName]
+            destFilesStatus = destTree['files'][fileName]
+            if srcFilesStatus['size'] != destFilesStatus['size'] or srcFilesStatus['modificationTime'] != destFilesStatus['modificationTime']:
+                filesToReplace.append(fileName)
+            elif checkAttrOnExistingFile(destTree['files'][fileName], p):
+                filesToAdjust.append(fileName)
+        else:
+            filesToCreate.append(fileName)
+
+    #print("directoriesToCreate:{0} filesToAdjust:{1} filesToCreate:{2} filesToReplace:{3}".format(directoriesToCreate, filesToAdjust, filesToCreate, filesToReplace))
+    
+    for f in directoriesToCreate:
+        p.changed = True
+        if not p.checkMode:
+            webHDFS.createFolder(f, p.directoryMode)
+            applyAttrOnNewDirectory(webHDFS, f, p)
+
+    for f in filesToAdjust:
+        p.changed = True
+        if not p.checkMode:
+            filePath = os.path.join(destTree['rroot'], f)
+            fileStatus = destTree['files'][f]
+            adjustAttrOnExistingFile(webHDFS, filePath, fileStatus, p)
+
+    for f in filesToCreate:
+        p.changed = True
+        if not p.checkMode:
+            srcPath = os.path.join(srcTree['rroot'], f)
+            destPath = os.path.join(destTree['rroot'], f)
+            webHDFS.putFileToHdfs(srcPath, destPath, p.force)
+            modTime = srcTree['files'][f]['modificationTime']
+            webHDFS.setModificationTime(destPath, modTime)
+            applyAttrOnNewFile(webHDFS, destPath, p)
+
+    if p.force:
+        for f in filesToReplace:
+            p.changed = True
+            if not p.checkMode:
+                srcPath = os.path.join(srcTree['rroot'], f)
+                destPath = os.path.join(destTree['rroot'], f)
+                if p.backup:
+                    backupHdfsFile(webHDFS, destPath)
+                webHDFS.putFileToHdfs(srcPath, destPath, p.force)
+                modTime = srcTree['files'][f]['modificationTime']
+                webHDFS.setModificationTime(destPath, modTime)
+                applyAttrOnNewFile(webHDFS, destPath, p)
+    
+
+
 
 from ansible.module_utils.basic import *
 
