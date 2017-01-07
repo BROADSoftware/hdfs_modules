@@ -173,7 +173,13 @@ class WebHDFS:
         resp = requests.get(url)
         if resp.status_code == 200:
             result = resp.json()
-            return (result['FileStatus']['type'], result['FileStatus'])
+            fs = {}
+            fs['size'] = result['FileStatus']['length']
+            fs['modificationTime'] = result['FileStatus']['modificationTime']/1000
+            fs['mode'] = "0" + result['FileStatus']['permission']
+            fs['owner'] = result['FileStatus']['owner']
+            fs['group'] = result['FileStatus']['group']
+            return (result['FileStatus']['type'], fs)
         elif resp.status_code == 404:
             return ("NOT_FOUND", None)
         elif resp.status_code == 403:
@@ -563,7 +569,7 @@ def main():
                 applyAttrOnNewFile(webHDFS, p.hdfsDest, p)
         elif destPathType == 'FILE':  # --------------------------------------------- Target already exists. Check if we need to overwrite.
             stat = os.stat(p.src)
-            if p.force and (stat.st_size != destStatus['length'] or  int(stat.st_mtime) != destStatus['modificationTime']/1000):
+            if p.force and (stat.st_size != destStatus['size'] or  int(stat.st_mtime) != destStatus['modificationTime']):
                 #print("{{ statst_size: {0}, destStatus_length: {1}, int_stat_st_mtime: {2}, estStatus_modificationTime_1000: {3} }}".format(stat.st_size, destStatus['length'], int(stat.st_mtime), destStatus['modificationTime']/100))
                 # File changed. Must be copied again
                 p.changed = True
