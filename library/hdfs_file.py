@@ -71,21 +71,13 @@ options:
         fed by HDFS 'FileSystem.setPermission' 
     required: false
     default: None
-  default_owner:
+  force:
     description:
-      - Name of the user that will own the directory in case of creation. Existing directory will not be modified.
+      - Used only when state==directory. The default is C(yes), which will adjust owner/group/mode on target directory with the provided value, if any. 
+        If C(no), existing directories will not be modified. owner/group/mode will only be used for newly created.
     required: false
-    default: None
-  default_group:
-    description:
-      - Name of the group that will own the directory in case of creation. Existing directory will not be modified.
-    required: false
-    default: None
-  default_mode:
-    description:
-      - Mode (Permission) the directory will be set in case of creation. Existing directory will not be modified.
-    required: false
-    default: None
+    choices: [ "yes", "no" ]
+    default: "yes"
   hadoop_conf_dir:
     description:
       - Where to find Hadoop configuration file, specially hdfs-site.xml, 
@@ -312,9 +304,7 @@ def main():
             owner = dict(required=False),
             group = dict(required=False),
             mode = dict(required=False),
-            default_owner = dict(required=False),
-            default_group = dict(required=False),
-            default_mode = dict(required=False),
+            force = dict(required=False, type='bool', default=True),
             hadoop_conf_dir = dict(required=False, default="/etc/hadoop/conf"),
             webhdfs_endpoint = dict(required=False, default=None),
             hdfs_user = dict(required=False, default="hdfs")
@@ -332,9 +322,7 @@ def main():
     p.owner = module.params['owner']
     p.group = module.params['group']
     p.mode = module.params['mode']
-    p.defaultOwner = module.params['default_owner']
-    p.defaultGroup = module.params['default_group']
-    p.defaultMode = module.params['default_mode']
+    p.force = module.params['force']
     p.hadoopConfDir = module.params['hadoop_conf_dir']
     p.webhdfsEndpoint = module.params['webhdfs_endpoint']
     p.hdfsUser = module.params['hdfs_user']
@@ -352,22 +340,6 @@ def main():
         p.mode = oct(p.mode).lstrip("0")
         #print '{ mode_type: "' + str(type(p.mode)) + '",  mode_value: "' + str(p.mode) + '"}'
 
-    if p.defaultMode != None:
-        if not isinstance(p.defaultMode, int):
-            try:
-                p.defaultMode = int(p.defaultMode, 8)
-            except Exception:
-                error("default_mode must be in octal form")
-    
-        p.defaultMode = oct(p.defaultMode).lstrip("0")
-
-    if(p.owner != None and p.defaultOwner != None):
-        error("There is no reason to define both owner and default_owner")
-    if(p.group != None and p.defaultGroup != None):
-        error("There is no reason to define both group and default_group")
-    if(p.mode != None and p.defaultMode != None):
-        error("There is no reason to define both mode and default_mode")
-
     if not p.path.startswith("/"):
         error("Path '{0}' is not absolute. Absolute path is required!", p.path)
 
@@ -382,14 +354,11 @@ def main():
         else:
             p.changed = True
             if not p.checkMode:
-                owner = p.defaultOwner if p.owner is None else p.owner
-                group = p.defaultGroup if p.group is None else p.group
-                mode = p.defaultMode if p.mode is None else p.mode
-                webhdfs.createFolder(p.path, mode)
-                if owner != None:
-                    webhdfs.setOwner(p.path, owner)
-                if group != None:
-                    webhdfs.setGroup(p.path, group)
+                webhdfs.createFolder(p.path, p.mode)
+                if p.owner != None:
+                    webhdfs.setOwner(p.path, p.owner)
+                if p.group != None:
+                    webhdfs.setGroup(p.path, p.group)
     else:
         if p.state == None:
             checkAndAdjustAttributes(webhdfs, fileStatus, p)
@@ -404,7 +373,8 @@ def main():
         elif p.state == State.FILE and fileStatus['type'] == HdfsType.FILE:
             checkAndAdjustAttributes(webhdfs, fileStatus, p)
         elif p.state == State.DIRECTORY and fileStatus['type'] == HdfsType.DIRECTORY:
-            checkAndAdjustAttributes(webhdfs, fileStatus, p)
+            if p.force:
+                checkAndAdjustAttributes(webhdfs, fileStatus, p)
         else:
             error("State mismatch: Requested:{0}  HDFS:{1}", p.state, fileStatus['type'])
     

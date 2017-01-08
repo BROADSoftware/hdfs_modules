@@ -57,8 +57,15 @@ options:
     default: "no"
   force:
     description:
-      - the default is C(yes), which will replace the remote file when size or modification time is different from the source. 
+      - the default is C(yes), which will replace the target file when size or modification time is different from the source. 
         If C(no), the file will only be transferred if the destination does not exist.
+    required: false
+    choices: [ "yes", "no" ]
+    default: "yes"
+  force_ext:
+    description:
+      - the default is C(yes), which will adjust owner/group/mode on target files and directory with the provided value, if any. 
+        If C(no), existing files and directories will not be modified.
     required: false
     choices: [ "yes", "no" ]
     default: "yes"
@@ -81,21 +88,6 @@ options:
   mode:
     description:
       - Mode (Permission) the file will be set, such as 0644 as would be fed by HDFS 'FileSystem.setPermission' 
-    required: false
-    default: None
-  default_owner:
-    description:
-      - Name of the user that will own the file in case of creation. Existing file will not be modified.
-    required: false
-    default: None
-  default_group:
-    description:
-      - Name of the group that will own the file in case of creation. Existing file will not be modified.
-    required: false
-    default: None
-  default_mode:
-    description:
-      - Mode (Permission) the file will be set in case of creation. Existing file will not be modified.
     required: false
     default: None
   hadoop_conf_dir:
@@ -335,43 +327,28 @@ def checkParameters(p):
                 error("mode must be in octal form")
         p.mode = oct(p.mode)
         #print '{ mode_type: "' + str(type(p.mode)) + '",  mode_value: "' + str(p.mode) + '"}'
-    if p.defaultMode != None:
-        if not isinstance(p.defaultMode, int):
-            try:
-                p.defaultMode = int(p.defaultMode, 8)
-            except Exception:
-                error("default_mode must be in octal form")
-        p.defaultMode = oct(p.defaultMode)
-    if(p.owner != None and p.defaultOwner != None):
-        error("There is no reason to define both owner and default_owner")
-    if(p.group != None and p.defaultGroup != None):
-        error("There is no reason to define both group and default_group")
-    if(p.mode != None and p.defaultMode != None):
-        error("There is no reason to define both mode and default_mode")
 
     if not p.hdfsDest.startswith("/"):
         error("hdfs_dest '{0}' is not absolute. Absolute path is required!", p.path)
 
+
 def applyAttrOnNewFile(webhdfs, path, p):
-    owner = p.defaultOwner if p.owner is None else p.owner
-    group = p.defaultGroup if p.group is None else p.group
-    mode = p.defaultMode if p.mode is None else p.mode
-    if owner != None:
-        webhdfs.setOwner(path, owner)
-    if group != None:
-        webhdfs.setGroup(path, group)
-    if mode != None:
-        webhdfs.setPermission(path, mode)
+    if p.owner != None:
+        webhdfs.setOwner(path,p.owner)
+    if p.group != None:
+        webhdfs.setGroup(path, p.group)
+    if p.mode != None:
+        webhdfs.setPermission(path, p.mode)
+
 
 def applyAttrOnNewDirectory(webhdfs, path, p):
-    owner = p.defaultOwner if p.owner is None else p.owner
-    group = p.defaultGroup if p.group is None else p.group
-    if owner != None:
-        webhdfs.setOwner(path, owner)
-    if group != None:
-        webhdfs.setGroup(path, group)
-
-
+    if p.owner != None:
+        webhdfs.setOwner(path, p.owner)
+    if p.group != None:
+        webhdfs.setGroup(path, p.group)
+    # Mode is defined at creation
+    
+    
 def adjustAttrOnExistingFile(webhdfs, filePath, fileStatus, p):
     if p.owner != None and p.owner != fileStatus['owner']:
         webhdfs.setOwner(filePath, p.owner)
@@ -381,6 +358,15 @@ def adjustAttrOnExistingFile(webhdfs, filePath, fileStatus, p):
         webhdfs.setPermission(filePath, p.mode)
 
 
+def adjustAttrOnExistingDir(webhdfs, dirPath, dirStatus, p):
+    if p.owner != None and p.owner != dirStatus['owner']:
+        webhdfs.setOwner(dirPath, p.owner)
+    if p.group != None and p.group != dirStatus['group']:
+        webhdfs.setGroup(dirPath, p.group)
+    if(p.directoryMode != None and p.directoryMode != dirStatus['mode']):
+        webhdfs.setPermission(dirPath, p.directoryMode)
+
+
 def checkAttrOnExistingFile(fileStatus, p):
     if p.owner != None and p.owner != fileStatus['owner']:
         return True
@@ -388,6 +374,15 @@ def checkAttrOnExistingFile(fileStatus, p):
         return True
     if(p.mode != None and fileStatus['mode'] != p.mode):
         #print("p.mode:{0}   fileStatus['mode']:{1}".format(p.mode, fileStatus['mode']))
+        return True
+    return False
+
+def checkAttrOnExistingDir(dirStatus, p):
+    if p.owner != None and p.owner != dirStatus['owner']:
+        return True
+    if p.group != None and p.group != dirStatus['group']:
+        return True
+    if(p.directoryMode != None and p.directoryMode != dirStatus['mode']):
         return True
     return False
 
@@ -502,11 +497,9 @@ def main():
     module = AnsibleModule(
         argument_spec = dict(
             backup = dict(required=False, type='bool', default=False),
-            default_group = dict(required=False, default=None),
-            default_mode = dict(required=False, default=None),
-            default_owner = dict(required=False, default=None),
             directory_mode = dict(required=False, default=None),
             force = dict(required=False, type='bool', default=True),
+            force_ext = dict(required=False, type='bool', default=True),
             group = dict(required=False, default=None),
             hadoop_conf_dir = dict(required=False, default="/etc/hadoop/conf"),
             hdfs_dest  = dict(required=True),
@@ -524,11 +517,9 @@ def main():
 
     p = Parameters()
     p.backup = module.params['backup']
-    p.defaultGroup = module.params['default_group']
-    p.defaultMode = module.params['default_mode']
-    p.defaultOwner = module.params['default_owner']
     p.directoryMode = module.params['directory_mode']
     p.force = module.params['force']
+    p.forceExt = module.params['force_ext']
     p.group = module.params['group']
     p.hadoopConfDir = module.params['hadoop_conf_dir']
     p.hdfsDest = module.params['hdfs_dest']
@@ -580,7 +571,7 @@ def main():
                     webHDFS.setModificationTime(p.hdfsDest, int(stat.st_mtime))
                     applyAttrOnNewFile(webHDFS, p.hdfsDest, p)
             else:
-                if checkAttrOnExistingFile(destStatus, p):
+                if checkAttrOnExistingFile(destStatus, p) and p.forceExt:
                     p.changed = True
                     if not p.checkMode:
                         adjustAttrOnExistingFile(webHDFS, p.hdfsDest, destStatus, p)
@@ -612,6 +603,7 @@ def handlePutByMirroring(webHDFS, p):
     srcTree = buildLocalTree(p.src)
 
     directoriesToCreate = []
+    directoriesToAdjust = []
     filesToCreate = []
     filesToReplace = []
     filesToAdjust = []
@@ -620,12 +612,15 @@ def handlePutByMirroring(webHDFS, p):
     if not srcTree['slashTerminated']:
         x = os.path.basename(srcTree['rroot'])
         p.hdfsDest = os.path.join(p.hdfsDest, x)
-        (ft, _) = webHDFS.getPathTypeAndStatus(p.hdfsDest)
+        (ft, dirStatus) = webHDFS.getPathTypeAndStatus(p.hdfsDest)
         if ft == "NOT_FOUND":
             directoriesToCreate.append(p.hdfsDest)
             destTree = buildEmptyTree(p.hdfsDest)
         elif ft == "DIRECTORY":
             destTree = buildHdfsTree(webHDFS, p.hdfsDest)
+            destTree['directories'][p.hdfsDest] = dirStatus  # Will need to to apply modification later on
+            if checkAttrOnExistingDir(dirStatus, p):
+                directoriesToAdjust.append(p.hdfsDest)
         else:
             error("HDFS path {0}: Invalid type: '{1}'", p.hdfsDest, ft)
     else:
@@ -633,10 +628,14 @@ def handlePutByMirroring(webHDFS, p):
     
     # Lookup all folder to create on target
     for dirName in srcTree['directories']:
-        if dirName not in destTree['directories']:
+        if dirName in destTree['directories']:
+            if checkAttrOnExistingDir(destTree['directories'][dirName], p):
+                directoriesToAdjust.append(dirName)
+        else:
             dirPath = os.path.join(destTree['rroot'], dirName)
             directoriesToCreate.append(dirPath)
                
+    directoriesToAdjust.sort()
     directoriesToCreate.sort()
 
     for fileName in srcTree['files']:
@@ -658,12 +657,20 @@ def handlePutByMirroring(webHDFS, p):
             webHDFS.createFolder(f, p.directoryMode)
             applyAttrOnNewDirectory(webHDFS, f, p)
 
-    for f in filesToAdjust:
-        p.changed = True
-        if not p.checkMode:
-            filePath = os.path.join(destTree['rroot'], f)
-            fileStatus = destTree['files'][f]
-            adjustAttrOnExistingFile(webHDFS, filePath, fileStatus, p)
+    if p.forceExt:
+        for f in directoriesToAdjust:
+            p.changed = True
+            if not p.checkMode:
+                dirPath = os.path.join(destTree['rroot'], f)
+                dirStatus = destTree['directories'][f]
+                adjustAttrOnExistingDir(webHDFS, dirPath, dirStatus, p)
+    
+        for f in filesToAdjust:
+            p.changed = True
+            if not p.checkMode:
+                filePath = os.path.join(destTree['rroot'], f)
+                fileStatus = destTree['files'][f]
+                adjustAttrOnExistingFile(webHDFS, filePath, fileStatus, p)
 
     for f in filesToCreate:
         p.changed = True
