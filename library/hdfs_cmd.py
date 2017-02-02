@@ -259,7 +259,7 @@ def main():
     )
     
     if not HAS_REQUESTS:
-        module.fail_json(msg="python-requests module is not installed")    
+        module.fail_json(msg="python-requests package is not installed")    
 
     shell = module.params['uses_shell']
     chdir = module.params['chdir']
