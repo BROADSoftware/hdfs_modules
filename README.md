@@ -12,6 +12,8 @@ This ansible role host a set of modules aimed to manipulate file and directory o
 
 These modules need the python-requests package to be present on the remote node.
 
+To be able to access kerberos protected cluster, python-requests-kerberos is also required 
+
 # Example Playbook
 
 

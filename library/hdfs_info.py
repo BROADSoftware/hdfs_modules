@@ -56,7 +56,10 @@ options:
     required: false
     default: None
   hdfs_user:
-    description: Define account to impersonate to perform required operation on HDFS through WebHDFS.
+    description: 
+    - Define account to impersonate to perform required operation on HDFS through WebHDFS.
+    - Also accepts the special value C(KERBEROS). In such case, a valid Kerberos ticket must exist for the ansible_ssh_user account. (A C(kinit) must be issued under this account). 
+      Then HDFS operation will be performed on behalf of the user defined by the Kerberos ticket.
     required: false
     default: "hdfs"
 author: 
@@ -127,25 +130,74 @@ except ImportError, AttributeError:
     # AttributeError if __version__ is not present
     pass
 
+
+HAS_KERBEROS = False
+try:
+    from requests_kerberos import HTTPKerberosAuth
+    HAS_KERBEROS = True
+except ImportError:
+    pass
+
 # Global, to allow access from error
 module = None
 
 class WebHDFS:
-    
+      
     def __init__(self, endpoint, hdfsUser):
         self.endpoint = endpoint
-        self.auth = "user.name=" + hdfsUser + "&"
-            
+        self.delegationToken = None
+        self.auth = None
+        if hdfsUser == "KERBEROS":
+            self.kerberos = True
+            if not HAS_KERBEROS:
+                error("'python-requests-kerberos' package is not installed")
+        else :
+            self.kerberos = False
+            self.auth = "user.name=" + hdfsUser + "&"
+        
+         
     def test(self):
-        url = "http://{0}/webhdfs/v1/?{1}op=GETFILESTATUS".format(self.endpoint, self.auth)
         try:
-            resp = requests.get(url)
-            if resp.status_code == 200:
-                return (True, "")
-            else: 
-                return (False, "{0}  =>  Response code: {1}".format(url, resp.status_code))
+            if self.kerberos:
+                kerberos_auth = HTTPKerberosAuth()
+                url = "http://{0}/webhdfs/v1/?op=GETDELEGATIONTOKEN".format(self.endpoint)
+                resp = requests.get(url, auth=kerberos_auth)
+                if resp.status_code == 200:
+                    result = resp.json()
+                    self.delegationToken = result['Token']['urlString']
+                    self.auth = "delegation=" + self.delegationToken + "&"
+                    return (True, "")
+                elif resp.status_code == 401:
+                    return (False, "{0}  =>  Response code: {1} (May be you need to perform 'kinit' on the remote host)".format(url, resp.status_code))
+                else: 
+                    return (False, "{0}  =>  Response code: {1}".format(url, resp.status_code))
+            else:
+                url = "http://{0}/webhdfs/v1/?{1}op=GETFILESTATUS".format(self.endpoint, self.auth)
+                resp = requests.get(url)
+                if resp.status_code == 200:
+                    return (True, "")
+                elif resp.status_code == 401:
+                    return (False, "{0}  =>  Response code: {1} (May be KERBEROS authentication must be used)".format(url, resp.status_code))
+                else: 
+                    return (False, "{0}  =>  Response code: {1}".format(url, resp.status_code))
         except Exception as e:
-            return (False, "{0}  =>  Response code: {1}".format(url, str(e)))
+            if self.kerberos:
+                return (False, "{0}  =>  Error: {1}. Are you sure this cluster is secured by Kerberos ?".format(url, str(e)))
+            else:
+                return (False, "{0}  =>  Error: {1}".format(url, str(e)))
+
+
+    def close(self):
+        if self.kerberos and self.delegationToken != None:
+            url = "http://{0}/webhdfs/v1/?{1}op=CANCELDELEGATIONTOKEN&token={2}".format(self.endpoint, self.auth, self.delegationToken)
+            self.put(url)
+      
+            
+    def put(self, url):
+        resp = requests.put(url, allow_redirects=False)
+        if resp.status_code != 200:  
+            error("Invalid returned http code '{0}' when calling '{1}'", resp.status_code, url)
+
         
     def getFileStatus(self, path):
         url = "http://{0}/webhdfs/v1{1}?{2}op=GETFILESTATUS".format(self.endpoint, path, self.auth)
@@ -171,8 +223,15 @@ class HdfsType:
     DIRECTORY = "DIRECTORY"
 
 
+webhdfs = None
+
+def cleanup():
+    if webhdfs != None:
+        webhdfs.close()
+        
 def error(message, *args):
     x = "" + message.format(*args)
+    cleanup()
     module.fail_json(msg = x)    
 
 
@@ -251,10 +310,12 @@ def main():
     if not p.path.startswith("/"):
         error("Path '{0}' is not absolute. Absolute path is required!", p.path)
   
+    global webhdfs
     webhdfs = lookupWebHdfs(p)
     
     fileStatus = webhdfs.getFileStatus(p.path)
     # NB: Need to set hdfs_path. If setting 'path', module.exit_json will add a 'state' referring to local file status.
+    cleanup()
     if fileStatus == None:
         module.exit_json(
             changed = False,
