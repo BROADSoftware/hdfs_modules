@@ -380,7 +380,14 @@ def checkParameters(p):
             except Exception:
                 error("mode must be in octal form")
         p.mode = oct(p.mode)
-        #print '{ mode_type: "' + str(type(p.mode)) + '",  mode_value: "' + str(p.mode) + '"}'
+    if p.directoryMode != None:
+        if not isinstance(p.directoryMode, int):
+            try:
+                p.directoryMode = int(p.directoryMode, 8)
+            except Exception:
+                error("directoryMode must be in octal form")
+        p.directoryMode = oct(p.directoryMode)
+        #print '{ mode_type: "' + str(type(p.directoryMode)) + '",  directoryMode_value: "' + str(p.directoryMode) + '"}'
 
     if not p.hdfsDest.startswith("/"):
         error("hdfs_dest '{0}' is not absolute. Absolute path is required!", p.path)
@@ -426,8 +433,8 @@ def checkAttrOnExistingFile(fileStatus, p):
         return True
     if p.group != None and p.group != fileStatus['group']:
         return True
+    #print("p.mode:{0}   fileStatus['mode']:{1}".format(p.mode, fileStatus['mode']))
     if(p.mode != None and fileStatus['mode'] != p.mode):
-        #print("p.mode:{0}   fileStatus['mode']:{1}".format(p.mode, fileStatus['mode']))
         return True
     return False
 
@@ -436,6 +443,7 @@ def checkAttrOnExistingDir(dirStatus, p):
         return True
     if p.group != None and p.group != dirStatus['group']:
         return True
+    #print("p.directoryMode:{0}   dirStatus['mode']:{1}".format(p.directoryMode, dirStatus['mode']))
     if(p.directoryMode != None and p.directoryMode != dirStatus['mode']):
         return True
     return False
@@ -643,7 +651,7 @@ def main():
         elif destPathType == "NO_ACCESS":
             error("HDFS path {0}: No access", p.hdfsDest)
         elif destPathType != "DIRECTORY":
-            error("HDFS path {0}: Unknown type: '{1}'", p.hdfsDest, ft)
+            error("HDFS path {0}: Unknown type: '{1}'", p.hdfsDest, destPathType)
         
         handlePutByMirroring(webHDFS, p)
 
